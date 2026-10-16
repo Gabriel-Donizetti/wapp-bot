@@ -1,0 +1,47 @@
+{
+  "name": "wapp",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web 'npm run dev -w @wapp/api' 'npm run dev -w @wapp/web'",
+    "build": "npm run build -w @wapp/api && npm run build -w @wapp/web",
+    "start": "npm start -w @wapp/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "node --env-file-if-exists=.env --import tsx --test --test-concurrency=1 apps/api/test/*.test.ts",
+    "test:ui": "node --env-file-if-exists=.env --import tsx test/e2e.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "db:migrate": "npm run db:migrate -w @wapp/api",
+    "db:import-sqlite": "npm run db:import-sqlite -w @wapp/api",
+    "user:create": "npm run user:create -w @wapp/api",
+    "setup": "node scripts/setup.mjs",
+    "format": "prettier --write \"apps/*/src/**/*.{ts,tsx,css}\" \"apps/api/test/*.ts\" \"packages/**/*.ts\" \"test/*.ts\" \"scripts/*.mjs\" \"*.json\" \"*.md\" \"docs/*.md\" \"*.yaml\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/supertest": "^6.0.3",
+    "concurrently": "^9.2.1",
+    "prettier": "^3.9.10",
+    "puppeteer": "24.38.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gabriel-Donizetti/wapp-bot.git"
+  },
+  "homepage": "https://github.com/Gabriel-Donizetti/wapp-bot#readme",
+  "bugs": {
+    "url": "https://github.com/Gabriel-Donizetti/wapp-bot/issues"
+  },
+  "author": "Gabriel Donizetti"
+}

@@ -1,0 +1,14 @@
+.git
+node_modules
+**/node_modules
+**/dist
+dist
+.env
+.env.*
+!.env.example
+data
+.wwebjs_auth
+.wwebjs_cache
+coverage
+*.log
+test

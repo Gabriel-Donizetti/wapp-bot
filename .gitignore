@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+.wwebjs_auth/
+.wwebjs_cache/
+coverage/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pem
+*.key
+.DS_Store
