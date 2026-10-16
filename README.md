@@ -2,12 +2,11 @@
 
 # Uma central para suas conexões WhatsApp
 
-Monorepo open source para gerenciar sessões WhatsApp, enviar texto e mídia, consultar
+Monorepo para gerenciar sessões WhatsApp, enviar texto e mídia, consultar
 contatos e grupos e agendar mensagens. Inclui painel React, API Express com JWT,
 PostgreSQL, histórico de envios e execução com Docker Compose.
 
 [![CI](https://github.com/Gabriel-Donizetti/wapp-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Gabriel-Donizetti/wapp-bot/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ![Painel Wapp com sessões, histórico e agendamentos](docs/images/dashboard.png)
 
@@ -287,7 +286,7 @@ Mantenha uma única API/worker de sessões por instalação. O modo local é o f
 de desenvolvimento; use os containers para validar o build ou implantar. Faça backup do banco e
 dos perfis WhatsApp; somente um deles não basta para restaurar toda a central.
 
-## Testes e contribuição
+## Testes
 
 ```bash
 npm run db:local:start
@@ -303,12 +302,6 @@ navegador usa React, Express e PostgreSQL reais com cliente WhatsApp simulado;
 não envia mensagens reais. O CI também compila os dois Dockerfiles. Para verificar imagens sem iniciar
 containers, execute `docker compose build`.
 
-Veja [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) e a
-[configuração de duas contas Git](docs/git-accounts.md). O estado dos alertas
+Veja a [configuração de duas contas Git](docs/git-accounts.md). O estado dos alertas
 transitivos do Puppeteer pode ser consultado com `npm audit`; não aplique
 `--force` sem validar a integração com WhatsApp Web.
-
-## Licença
-
-[MIT](LICENSE), Copyright 2026 Gabriel Donizetti. As dependências mantêm suas
-[próprias licenças](THIRD_PARTY_NOTICES.md).

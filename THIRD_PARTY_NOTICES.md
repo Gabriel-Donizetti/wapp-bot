@@ -1,7 +1,7 @@
 # Dependências de terceiros
 
-O código deste repositório é distribuído sob MIT. As dependências mantêm suas
-próprias licenças, disponíveis nos respectivos pacotes e repositórios.
+As dependências mantêm suas próprias licenças, disponíveis nos respectivos
+pacotes e repositórios.
 
 - [whatsapp-web.js](https://github.com/wwebjs/whatsapp-web.js): Apache-2.0,
   Copyright 2019 Pedro S. Lopez.
