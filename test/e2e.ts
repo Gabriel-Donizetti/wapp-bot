@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import puppeteer from "puppeteer";
 import { fixture, testPassword } from "../apps/api/test/helpers.js";
@@ -127,6 +128,38 @@ try {
   await page.waitForFunction(() =>
     document.querySelector("tbody .badge")?.textContent?.includes("Cancelada"),
   );
+  await nav("Nova mensagem");
+  await page.waitForSelector(".recipient");
+  await page.click(".recipient");
+  await page.select('select[name="messageType"]', "image");
+  const imagePath = join(f.dir, "image.png");
+  writeFileSync(
+    imagePath,
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
+  const upload = await page.$('input[type="file"]');
+  assert.ok(upload);
+  await upload.uploadFile(imagePath);
+  await page.type('textarea[name="text"]', "Imagem pelo React");
+  await page.click(".message-panel button.primary");
+  await page.waitForSelector(".success-box");
+  assert.equal(client.deliveries.at(-1)!.options?.caption, "Imagem pelo React");
+  assert.equal(typeof client.deliveries.at(-1)!.content, "object");
+  await page.select('select[name="messageType"]', "poll");
+  await page.type('input[name="pollName"]', "Qual horário?");
+  await page.type('textarea[name="pollOptions"]', "Manhã\nTarde");
+  await page.click(".message-panel button.primary");
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('select[name="messageType"]')
+        ?.getAttribute("name") === "messageType" &&
+      !document.querySelector('input[name="pollName"]'),
+  );
+  assert.equal(client.deliveries.length, 3);
   await nav("Histórico");
   await page.waitForSelector("tbody tr");
   assert.match(
@@ -162,7 +195,7 @@ try {
   await page.waitForSelector(".swagger-ui .info");
   assert.deepEqual(errors, []);
   console.log(
-    "React + Express + PostgreSQL: login JWT, sessão/QR, filtros sem acentos, envio simulado, agendamento/fuso, cancelamento, histórico, criação de usuário, recarga autenticada, logout, Swagger e layout móvel validados.",
+    "React + Express + PostgreSQL: login JWT, sessão/QR, filtros sem acentos, envios simulados de texto/imagem/enquete, agendamento/fuso, cancelamento, histórico, criação de usuário, recarga autenticada, logout, Swagger e layout móvel validados.",
   );
 } finally {
   await browser.close();

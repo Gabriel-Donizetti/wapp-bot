@@ -23,7 +23,10 @@
     "db:import-sqlite": "npm run db:import-sqlite -w @wapp/api",
     "user:create": "npm run user:create -w @wapp/api",
     "setup": "node scripts/setup.mjs",
-    "format": "prettier --write \"apps/*/src/**/*.{ts,tsx,css}\" \"apps/api/test/*.ts\" \"packages/**/*.ts\" \"test/*.ts\" \"scripts/*.mjs\" \"*.json\" \"*.md\" \"docs/*.md\" \"*.yaml\""
+    "format": "prettier --write \"apps/*/src/**/*.{ts,tsx,css}\" \"apps/api/test/*.ts\" \"packages/**/*.ts\" \"test/*.ts\" \"scripts/*.mjs\" \"*.json\" \"*.md\" \"docs/*.md\" \"*.yaml\"",
+    "db:local:start": "node --env-file-if-exists=.env scripts/local-db.mjs start",
+    "db:local:stop": "node --env-file-if-exists=.env scripts/local-db.mjs stop",
+    "db:local:status": "node --env-file-if-exists=.env scripts/local-db.mjs status"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

@@ -1,6 +1,7 @@
 # Contribuir com o Wapp
 
-Use Node.js 24 e Docker Compose. Leia o README para configurar o ambiente.
+Use Node.js 24 e PostgreSQL 16+ local. Docker Compose é usado para validar
+as imagens e para quem escolher executar a stack em containers. Leia o README para configurar o ambiente.
 
 1. Crie uma branch para sua alteração.
 2. Mantenha regras de negócio nos módulos de `apps/api/src/modules` e acesso ao

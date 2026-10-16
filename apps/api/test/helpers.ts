@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
+import type whatsapp from "whatsapp-web.js";
 import { createPool } from "../src/database/pool.js";
 import { migrate } from "../src/database/migrate.js";
 import {
@@ -22,6 +23,14 @@ export const testSecret = "test-only-jwt-secret-with-over-32-characters";
 export class FakeClient extends EventEmitter {
   info = { wid: { user: "5511999999999", server: "c.us" } };
   sent: Array<{ to: string; text: string }> = [];
+  deliveries: Array<{
+    to: string;
+    content: Parameters<whatsapp.Client["sendMessage"]>[1];
+    options?: whatsapp.MessageSendOptions;
+  }> = [];
+  quotedChatId = "5511888888888@c.us";
+  quoteMissing = false;
+  contactError = false;
   registered = true;
   sendError = false;
   contactsError = false;
@@ -76,15 +85,37 @@ export class FakeClient extends EventEmitter {
     if (this.contactsError) throw new Error("Falha na consulta de contatos");
     return this.contacts;
   }
+  async getChannels() {
+    return [
+      { id: { _serialized: "120363000000@newsletter" }, name: "Novidades" },
+    ];
+  }
   async listGroups() {
     if (this.groupsError) throw new Error("Falha na consulta de grupos");
     return [{ id: "120363000000@g.us", name: this.groupName }];
   }
-  async sendMessage(to: string, text: string) {
+  async getContactById(id: string) {
+    if (this.contactError) throw new Error("Contato indisponível");
+    return { id: { _serialized: id }, isUser: true, isGroup: false };
+  }
+  async getMessageById(id: string) {
+    return this.quoteMissing
+      ? null
+      : { id: { _serialized: id, remote: this.quotedChatId } };
+  }
+  async sendMessage(
+    to: string,
+    content: Parameters<whatsapp.Client["sendMessage"]>[1],
+    options?: whatsapp.MessageSendOptions,
+  ) {
     this.onSend?.();
     await this.sendGate;
     if (this.sendError) throw new Error("Conexão encerrada");
-    this.sent.push({ to, text });
+    this.deliveries.push({ to, content, options });
+    this.sent.push({
+      to,
+      text: typeof content === "string" ? content : "[media]",
+    });
     return { id: { _serialized: `message-${this.sent.length}` } };
   }
   asPort() {

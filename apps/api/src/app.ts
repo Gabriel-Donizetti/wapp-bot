@@ -21,6 +21,7 @@ import { scheduleRoutes } from "./modules/schedules/schedule-routes.js";
 import { MessageService } from "./modules/messages/message-service.js";
 import { messageRoutes } from "./modules/messages/message-routes.js";
 import { openapi } from "./http/openapi.js";
+import { integrationGuide } from "./http/integration-guide.js";
 
 export interface Dependencies {
   pool: Pool;
@@ -78,10 +79,13 @@ export function buildApp(deps: Dependencies) {
       exposedHeaders: ["X-Request-ID"],
     }),
   );
-  app.use(express.json({ limit: "32kb" }));
+  app.use(express.json({ limit: "24mb" }));
   app.get("/health", async (_req, res) => {
     await deps.pool.query("SELECT 1");
     res.json({ status: "ok", database: "postgresql" });
+  });
+  app.get("/integration-guide", async (_req, res) => {
+    res.type("html").send(await integrationGuide());
   });
   app.get("/openapi.json", (_req, res) => {
     res.json(openapi);
@@ -145,49 +149,40 @@ export function buildApp(deps: Dependencies) {
   const errors: ErrorRequestHandler = (error, req, res, _next) => {
     if (res.headersSent) return _next(error);
     if (error instanceof ZodError) {
-      res
-        .status(400)
-        .json({
-          error: "VALIDATION_ERROR",
-          message: "Dados inválidos.",
-          details: error.issues,
-          requestId: req.id,
-        });
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Dados inválidos.",
+        details: error.issues,
+        requestId: req.id,
+      });
       return;
     }
     if (error instanceof AppError) {
-      res
-        .status(error.statusCode)
-        .json({
-          error: error.code,
-          message: error.message,
-          ...(error.details ? { details: error.details } : {}),
-          requestId: req.id,
-        });
+      res.status(error.statusCode).json({
+        error: error.code,
+        message: error.message,
+        ...(error.details ? { details: error.details } : {}),
+        requestId: req.id,
+      });
       return;
     }
     if (error.status === 400 || error.status === 413) {
-      res
-        .status(error.status)
-        .json({
-          error: "BAD_REQUEST",
-          message:
-            error.status === 413
-              ? "Corpo da requisição muito grande."
-              : "JSON inválido.",
-          requestId: req.id,
-        });
+      res.status(error.status).json({
+        error: "BAD_REQUEST",
+        message:
+          error.status === 413
+            ? "Corpo da requisição muito grande."
+            : "JSON inválido.",
+        requestId: req.id,
+      });
       return;
     }
     req.log.error({ err: error }, "Falha na requisição");
-    res
-      .status(500)
-      .json({
-        error: "INTERNAL_ERROR",
-        message:
-          "Erro interno. Consulte o identificador da requisição nos logs.",
-        requestId: req.id,
-      });
+    res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: "Erro interno. Consulte o identificador da requisição nos logs.",
+      requestId: req.id,
+    });
   };
   app.use(errors);
   return app;

@@ -8,10 +8,23 @@ import {
   Users,
   UserRound,
 } from "lucide-react";
-import type { Directory, Message, Session } from "@wapp/contracts";
+import type {
+  Directory,
+  Message,
+  Session,
+  MessageType,
+  SendMessageRequest,
+} from "@wapp/contracts";
 import { api } from "../lib/api";
 import { useResource } from "../lib/use-resource";
 import { Empty, ErrorBox, Loading, useAction } from "../components/ui";
+import {
+  MessageFields,
+  messageTypeLabels,
+  hasCaption,
+  readMessageContent,
+  readSendOptions,
+} from "../components/message-fields";
 const normalize = (value: string) =>
   value
     .normalize("NFD")
@@ -26,6 +39,7 @@ export function ComposePage({
 }) {
   const [chosen, setChosen] = useState("");
   const [to, setTo] = useState("");
+  const [messageType, setMessageType] = useState<MessageType>("text");
   const [text, setText] = useState("");
   const [kind, setKind] = useState("all");
   const [search, setSearch] = useState("");
@@ -72,9 +86,17 @@ export function ComposePage({
   const selected = recipients.find((item) => item.id === to);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    const form = new FormData(event.currentTarget as HTMLFormElement);
     void action.run(
       async () => {
-        const input = { sessionId, to, text };
+        const content = await readMessageContent(messageType, form, text);
+        const options = readSendOptions(form);
+        const input: SendMessageRequest = {
+          sessionId,
+          to,
+          ...content,
+          ...(options ? { options } : {}),
+        };
         if (mode === "later") {
           const date = new Date(sendAt);
           if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now())
@@ -99,6 +121,7 @@ export function ComposePage({
           attempt.current = null;
         }
         setText("");
+        setMessageType("text");
         onSent();
       },
       mode === "later"
@@ -114,7 +137,7 @@ export function ComposePage({
           <h1>Nova mensagem</h1>
           <p>Escolha o destino. Envie agora ou programe para depois.</p>
         </div>
-        <span className="subtle-tag">Somente texto</span>
+        <span className="subtle-tag">Texto e mídia</span>
       </div>
       <div className="compose-grid">
         <section className="card recipient-panel">
@@ -257,18 +280,72 @@ export function ComposePage({
               />
             </label>
             <label>
-              Mensagem
-              <textarea
-                name="text"
-                rows={9}
-                placeholder="Escreva sua mensagem aqui…"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                required
-                maxLength={4096}
-              />
-              <span className="character-count">{text.length} / 4.096</span>
+              Tipo de mensagem
+              <select
+                name="messageType"
+                aria-label="Tipo de mensagem"
+                value={messageType}
+                onChange={(event) => {
+                  setMessageType(event.target.value as MessageType);
+                  setText("");
+                }}
+              >
+                {Object.entries(messageTypeLabels).map(([type, label]) => (
+                  <option key={type} value={type}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </label>
+            <MessageFields key={messageType} type={messageType} />
+            {messageType === "text" || hasCaption(messageType) ? (
+              <label>
+                {messageType === "text" ? "Mensagem" : "Legenda (opcional)"}
+                <textarea
+                  name="text"
+                  rows={9}
+                  placeholder="Escreva sua mensagem aqui…"
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  required={messageType === "text"}
+                  maxLength={4096}
+                />
+                <span className="character-count">{text.length} / 4.096</span>
+              </label>
+            ) : null}
+            <details>
+              <summary>Responder a uma mensagem e adicionar menções</summary>
+              <div className="stack">
+                <label>
+                  ID da mensagem citada
+                  <input
+                    name="replyTo"
+                    maxLength={512}
+                    placeholder="ID do WhatsApp, disponível na mesma conversa"
+                  />
+                </label>
+                <label>
+                  IDs dos usuários mencionados
+                  <textarea
+                    name="mentions"
+                    rows={2}
+                    placeholder="5511999999999@c.us"
+                  />
+                </label>
+                <label>
+                  Grupos mencionados
+                  <textarea
+                    name="groupMentions"
+                    rows={2}
+                    placeholder="120363000000@g.us|Nome do grupo"
+                  />
+                </label>
+                <small>
+                  Um ID por linha. No texto, use @número para identificar a
+                  menção. O ID citado é messageId, não o ID do registro no Wapp.
+                </small>
+              </div>
+            </details>
             <div className="delivery-options">
               <button
                 type="button"
@@ -315,7 +392,7 @@ export function ComposePage({
               disabled={
                 action.busy ||
                 !sessionId ||
-                !text.trim() ||
+                (messageType === "text" && !text.trim()) ||
                 (mode === "now" && !ready)
               }
             >

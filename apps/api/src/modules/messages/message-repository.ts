@@ -1,10 +1,16 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Message, Page } from "@wapp/contracts";
 import type { Pool } from "../../database/pool.js";
 import type { MessageInput } from "../../shared/validation.js";
 import { AppError } from "../../shared/errors.js";
+import {
+  normalize,
+  messageText,
+  preview,
+  requestHash,
+} from "./message-content.js";
 const fields =
-  'id,session_id AS "sessionId",recipient AS "to",text,status,whatsapp_message_id AS "messageId",error,created_at AS "createdAt",sent_at AS "sentAt"';
+  'id,session_id AS "sessionId",recipient AS "to",text,type,content,status,whatsapp_message_id AS "messageId",error,created_at AS "createdAt",sent_at AS "sentAt"';
 export class MessageRepository {
   constructor(readonly pool: Pool) {}
   async reserve(
@@ -12,9 +18,8 @@ export class MessageRepository {
     userId: string,
     key?: string,
   ): Promise<{ record: Message; created: boolean }> {
-    const hash = createHash("sha256")
-      .update(JSON.stringify([input.sessionId, input.to, input.text]))
-      .digest("hex");
+    const data = normalize(input);
+    const hash = requestHash(data);
     const previous = async () => {
       if (!key) return;
       const row = (
@@ -38,17 +43,19 @@ export class MessageRepository {
     if (existing) return { record: existing, created: false };
     const result = await this.pool.query(
       `WITH active AS (SELECT id FROM sessions WHERE id=$2 AND deleted_at IS NULL FOR SHARE)
-      INSERT INTO messages(id,session_id,requested_by,recipient,text,status,idempotency_key,request_hash)
-      SELECT $1,s.id,$3,$4,$5,'sending',$6,$7 FROM active s
+      INSERT INTO messages(id,session_id,requested_by,recipient,text,status,idempotency_key,request_hash,type,content)
+      SELECT $1,s.id,$3,$4,$5,'sending',$6,$7,$8,$9 FROM active s
       ON CONFLICT(requested_by,idempotency_key) DO NOTHING RETURNING ${fields}`,
       [
         randomUUID(),
         input.sessionId,
         userId,
         input.to,
-        input.text,
+        messageText(data),
         key ?? null,
         hash,
+        data.type,
+        JSON.stringify(preview(data)),
       ],
     );
     if (result.rowCount) return { record: result.rows[0], created: true };

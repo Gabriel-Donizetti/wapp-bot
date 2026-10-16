@@ -4,6 +4,8 @@ import whatsapp from "whatsapp-web.js";
 import QRCode from "qrcode";
 import { AppError } from "../../shared/errors.js";
 import { SessionRepository, type SessionRecord } from "./session-repository.js";
+import { normalize } from "../messages/message-content.js";
+import { prepareMessage } from "../messages/whatsapp-message.js";
 import type { MessageInput } from "../../shared/validation.js";
 import { readGroupSummaries, type GroupSummary } from "./groups.js";
 
@@ -14,7 +16,10 @@ export type ClientPort = Pick<
   | "initialize"
   | "destroy"
   | "getContacts"
+  | "getChannels"
   | "getNumberId"
+  | "getContactById"
+  | "getMessageById"
   | "sendMessage"
   | "info"
 > & {
@@ -367,12 +372,34 @@ export class Sessions {
     };
   }
 
-  async send(input: MessageInput) {
+  async channels(id: string) {
+    const { client } = await this.ready(id);
+    try {
+      return (await withTimeout(client.getChannels())).map((channel) => ({
+        id: channel.id._serialized,
+        name: channel.name,
+      }));
+    } catch (error) {
+      this.onError(error, id);
+      throw new AppError(
+        502,
+        "CHANNELS_UNAVAILABLE",
+        "Não foi possível listar os canais desta sessão.",
+      );
+    }
+  }
+
+  async send(request: MessageInput) {
+    const input = normalize(request);
     const runtime = await this.ready(input.sessionId);
     runtime.activeSends++;
     try {
       let chatId = input.to;
-      if (!chatId.endsWith("@g.us") && !chatId.endsWith("@lid")) {
+      if (
+        !chatId.endsWith("@g.us") &&
+        !chatId.endsWith("@lid") &&
+        !chatId.endsWith("@newsletter")
+      ) {
         const number = chatId.replace(/@c\.us$/, "").replace(/^\+/, "");
         const resolved = await withTimeout(runtime.client.getNumberId(number));
         if (!resolved)
@@ -383,9 +410,27 @@ export class Sessions {
           );
         chatId = resolved._serialized;
       }
+      let prepared: Awaited<ReturnType<typeof prepareMessage>>;
+      try {
+        prepared = await withTimeout(
+          prepareMessage(runtime.client, input, chatId),
+        );
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw new AppError(
+          502,
+          "MESSAGE_PREPARATION_FAILED",
+          "Não foi possível preparar a mensagem. Verifique os contatos e a mensagem citada.",
+        );
+      }
       try {
         const result = await withTimeout(
-          runtime.client.sendMessage(chatId, input.text, { sendSeen: false }),
+          runtime.client.sendMessage(
+            chatId,
+            prepared.content,
+            prepared.options,
+          ),
+          120_000,
         );
         if (!result?.id?._serialized) throw new Error("Resposta sem ID.");
         return {

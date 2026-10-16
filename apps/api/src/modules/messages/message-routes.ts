@@ -1,11 +1,11 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { messageSchema } from "../../shared/validation.js";
+import { messageSchema, messageTypes } from "../../shared/validation.js";
 import { historyQuery, uuidParam } from "../../http/query.js";
 import { MessageService } from "./message-service.js";
 export function messageRoutes(service: MessageService) {
   const router = Router();
-  router.post("/", async (req, res) => {
+  const send = async (req: Request, res: Response) => {
     const key = z
       .string()
       .regex(/^[\x21-\x7e]{1,128}$/)
@@ -21,7 +21,22 @@ export function messageRoutes(service: MessageService) {
         result.created ? 201 : result.record.status === "sending" ? 202 : 200,
       )
       .json(result.record);
-  });
+  };
+  router.post("/", send);
+  for (const type of messageTypes) {
+    router.post(`/${type}`, async (req, res) => {
+      // A rota escolhe o tipo; o mesmo validador recusa campos de outro formato.
+      if (
+        req.body &&
+        typeof req.body === "object" &&
+        !Array.isArray(req.body)
+      ) {
+        if (req.body.type !== undefined) z.literal(type).parse(req.body.type);
+        req.body = { ...req.body, type };
+      }
+      await send(req, res);
+    });
+  }
   router.get("/", async (req, res) => {
     const query = historyQuery.parse(req.query);
     res.json(

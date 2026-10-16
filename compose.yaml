@@ -31,7 +31,7 @@ services:
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       DATA_DIR: /app/data
-      CHROME_EXECUTABLE_PATH: /usr/bin/chromium
+      CHROME_EXECUTABLE_PATH: /usr/local/bin/wapp-chrome
       CHROME_NO_SANDBOX: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:

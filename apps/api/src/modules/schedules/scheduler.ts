@@ -40,7 +40,9 @@ export class Scheduler {
         continue;
       let result: Awaited<ReturnType<Sessions["send"]>>;
       try {
-        result = await this.sessions.send(item);
+        result = await this.sessions.send(
+          await this.store.deliveryInput(item.id),
+        );
       } catch (error) {
         if (error instanceof AppError && error.code === "SESSION_NOT_READY") {
           await this.store.finish(item.id, "pending", null, null);

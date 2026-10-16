@@ -46,7 +46,7 @@ export function IntegrationsPage() {
           {
             icon: Send,
             title: "3. Envie com segurança",
-            text: "Informe sessão, destino e texto. Use Idempotency-Key para evitar repetir o mesmo envio.",
+            text: "Informe sessão, destino e o tipo de mensagem. Use Idempotency-Key para evitar repetir o mesmo envio.",
           },
           {
             icon: CalendarClock,
@@ -67,6 +67,11 @@ export function IntegrationsPage() {
         <pre>
           <code>{`curl -X POST ${origin}/api/v1/auth/login \\\n  -H 'Content-Type: application/json' \\\n  -d '{"username":"seu-app","password":"sua-senha"}'\n\ncurl ${origin}/api/v1/sessions \\\n  -H 'Authorization: Bearer SEU_TOKEN_JWT'`}</code>
         </pre>
+        <p>
+          <a href="/integration-guide" target="_blank" rel="noreferrer">
+            Guia de integração com exemplos em cURL, Node.js e Python
+          </a>
+        </p>
         <p className="footnote">
           O token tem validade limitada e pode ser revogado pelo endpoint de
           logout. A documentação interativa contém todas as rotas, parâmetros e
