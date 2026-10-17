@@ -2,6 +2,5 @@
   "name": "@wapp/contracts",
   "version": "1.0.0",
   "private": true,
-  "types": "index.d.ts",
-  "license": "MIT"
+  "types": "index.d.ts"
 }

@@ -4,6 +4,9 @@ import whatsapp from "whatsapp-web.js";
 import QRCode from "qrcode";
 import { AppError } from "../../shared/errors.js";
 import { SessionRepository, type SessionRecord } from "./session-repository.js";
+import { normalize } from "../messages/message-content.js";
+import { prepareMessage } from "../messages/whatsapp-message.js";
+import { validAck, type Receipt } from "../messages/delivery-repository.js";
 import type { MessageInput } from "../../shared/validation.js";
 import { readGroupSummaries, type GroupSummary } from "./groups.js";
 
@@ -14,12 +17,26 @@ export type ClientPort = Pick<
   | "initialize"
   | "destroy"
   | "getContacts"
+  | "getChannels"
   | "getNumberId"
+  | "getContactById"
+  | "getMessageById"
+  | "getPollVotes"
   | "sendMessage"
   | "info"
 > & {
   listGroups(): Promise<GroupSummary[]>;
 };
+export interface SendResult {
+  sessionId: string;
+  to: string;
+  messageId: string;
+  ack: number | null;
+}
+export interface DeliveryHooks {
+  receipt(receipt: Receipt): Promise<void>;
+  ready?(sessionId: string): Promise<void>;
+}
 export type ClientFactory = (id: string) => ClientPort;
 type State =
   "starting" | "qr" | "authenticated" | "ready" | "disconnected" | "error";
@@ -91,12 +108,15 @@ export class Sessions {
   private runtimes = new Map<string, Runtime>();
   private operations = new Set<string>();
   private closing = false;
+  private receiptTasks = new Set<Promise<void>>();
 
   constructor(
     private repository: SessionRepository,
     private factory: ClientFactory,
     private authPath: string,
     private onError: (error: unknown, sessionId: string) => void = () => {},
+    private delivery?: DeliveryHooks,
+    private sendTimeoutMs = 120_000,
   ) {}
 
   async list() {
@@ -184,6 +204,23 @@ export class Sessions {
             }
           });
       });
+      runtime.client.on("message_ack", (message, ack) => {
+        if (
+          !current() ||
+          !message.fromMe ||
+          !message.id?._serialized ||
+          validAck(ack) === null
+        )
+          return;
+        this.queueReceipt(
+          this.delivery?.receipt({
+            sessionId: id,
+            messageId: message.id._serialized,
+            ack,
+          }),
+          id,
+        );
+      });
       runtime.client.on("authenticated", () => {
         if (current()) {
           runtime.status = "authenticated";
@@ -197,6 +234,7 @@ export class Sessions {
           runtime.error = null;
           const wid = runtime.client.info?.wid;
           runtime.phone = wid?.server === "c.us" ? wid.user : null;
+          this.queueReceipt(this.delivery?.ready?.(id), id);
         }
       });
       runtime.client.on("auth_failure", () => {
@@ -367,12 +405,100 @@ export class Sessions {
     };
   }
 
-  async send(input: MessageInput) {
+  async channels(id: string) {
+    const { client } = await this.ready(id);
+    try {
+      return (await withTimeout(client.getChannels())).map((channel) => ({
+        id: channel.id._serialized,
+        name: channel.name,
+      }));
+    } catch (error) {
+      this.onError(error, id);
+      throw new AppError(
+        502,
+        "CHANNELS_UNAVAILABLE",
+        "Não foi possível listar os canais desta sessão.",
+      );
+    }
+  }
+
+  private queueReceipt(task: Promise<void> | undefined, sessionId: string) {
+    if (!task) return;
+    const tracked = task
+      .catch((error) => this.onError(error, sessionId))
+      .finally(() => this.receiptTasks.delete(tracked));
+    this.receiptTasks.add(tracked);
+  }
+  async flushReceipts() {
+    await Promise.all([...this.receiptTasks]);
+  }
+  async refreshReceipt(sessionId: string, messageId: string) {
+    const { client } = await this.ready(sessionId);
+    let message: Awaited<ReturnType<ClientPort["getMessageById"]>>;
+    try {
+      message = await withTimeout(client.getMessageById(messageId), 15_000);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(
+        502,
+        "RECEIPT_UNAVAILABLE",
+        "Não foi possível consultar a confirmação no WhatsApp. O status anterior foi preservado.",
+      );
+    }
+    if (!message || !message.fromMe)
+      throw new AppError(
+        422,
+        "RECEIPT_UNAVAILABLE",
+        "A mensagem não está disponível nesta sessão. Isso não confirma falha no envio.",
+      );
+    await this.delivery?.receipt({
+      sessionId,
+      messageId,
+      ack: validAck(message.ack),
+      checked: true,
+    });
+  }
+
+  async pollVotes(sessionId: string, messageId: string) {
+    const { client } = await this.ready(sessionId);
+    try {
+      const message = await withTimeout(
+        client.getMessageById(messageId),
+        15_000,
+      );
+      // getPollVotes retorna [] também quando a mensagem não está no histórico.
+      if (!message || !message.fromMe || message.type !== "poll_creation")
+        throw new AppError(
+          422,
+          "POLL_UNAVAILABLE",
+          "A enquete não está disponível no histórico desta sessão. Não é possível concluir se há votos.",
+        );
+      return await withTimeout(client.getPollVotes(messageId), 15_000);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(
+        502,
+        "POLL_UNAVAILABLE",
+        "Não foi possível consultar as respostas da enquete no WhatsApp.",
+      );
+    }
+  }
+
+  async send(
+    request: MessageInput,
+    onLateResult?: (result: SendResult) => Promise<void>,
+  ): Promise<SendResult> {
+    const input = normalize(request);
     const runtime = await this.ready(input.sessionId);
     runtime.activeSends++;
+    let releaseOnSettlement = false;
     try {
       let chatId = input.to;
-      if (!chatId.endsWith("@g.us") && !chatId.endsWith("@lid")) {
+      if (
+        !chatId.endsWith("@g.us") &&
+        !chatId.endsWith("@lid") &&
+        !chatId.endsWith("@newsletter")
+      ) {
         const number = chatId.replace(/@c\.us$/, "").replace(/^\+/, "");
         const resolved = await withTimeout(runtime.client.getNumberId(number));
         if (!resolved)
@@ -383,17 +509,48 @@ export class Sessions {
           );
         chatId = resolved._serialized;
       }
+      let prepared: Awaited<ReturnType<typeof prepareMessage>>;
       try {
-        const result = await withTimeout(
-          runtime.client.sendMessage(chatId, input.text, { sendSeen: false }),
+        prepared = await withTimeout(
+          prepareMessage(runtime.client, input, chatId),
         );
-        if (!result?.id?._serialized) throw new Error("Resposta sem ID.");
-        return {
-          sessionId: input.sessionId,
-          to: chatId,
-          messageId: result.id._serialized,
-        };
-      } catch {
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw new AppError(
+          502,
+          "MESSAGE_PREPARATION_FAILED",
+          "Não foi possível preparar a mensagem. Verifique os contatos e a mensagem citada.",
+        );
+      }
+      let timedOut = false;
+      try {
+        const pending = runtime.client
+          .sendMessage(chatId, prepared.content, prepared.options)
+          .then((message) => {
+            if (!message?.id?._serialized) throw new Error("Resposta sem ID.");
+            const result = {
+              sessionId: input.sessionId,
+              to: chatId,
+              messageId: message.id._serialized,
+              ack: validAck(message.ack),
+            };
+            if (timedOut)
+              this.queueReceipt(onLateResult?.(result), input.sessionId);
+            return result;
+          });
+        releaseOnSettlement = true;
+        void pending.then(
+          () => {
+            runtime.activeSends--;
+          },
+          () => {
+            runtime.activeSends--;
+          },
+        );
+        return await withTimeout(pending, this.sendTimeoutMs);
+      } catch (error) {
+        this.onError(error, input.sessionId);
+        timedOut = true;
         throw new AppError(
           502,
           "SEND_UNCERTAIN",
@@ -401,7 +558,7 @@ export class Sessions {
         );
       }
     } finally {
-      runtime.activeSends--;
+      if (!releaseOnSettlement) runtime.activeSends--;
     }
   }
 
@@ -413,5 +570,6 @@ export class Sessions {
       ),
     );
     this.runtimes.clear();
+    await this.flushReceipts();
   }
 }

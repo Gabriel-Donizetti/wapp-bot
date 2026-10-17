@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   BookOpen,
+  BarChart3,
   CalendarClock,
   ChevronRight,
   History,
@@ -14,7 +15,7 @@ import {
   Smartphone,
   X,
 } from "lucide-react";
-import type { Session } from "@wapp/contracts";
+import type { MessageType, Session } from "@wapp/contracts";
 import { useAuth } from "./auth/AuthProvider";
 import { useResource } from "./lib/use-resource";
 import { Loading } from "./components/ui";
@@ -26,20 +27,24 @@ import { UsersPage } from "./pages/UsersPage";
 import { AccountPage } from "./pages/AccountPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { PollsPage } from "./pages/PollsPage";
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "sessions", label: "Sessões", icon: Smartphone },
   { id: "compose", label: "Nova mensagem", icon: Send },
   { id: "schedules", label: "Agendamentos", icon: CalendarClock },
   { id: "messages", label: "Histórico", icon: History },
+  { id: "polls", label: "Enquetes", icon: BarChart3 },
   { id: "integrations", label: "API & integrações", icon: BookOpen },
 ];
 function Dashboard() {
   const { user, logout } = useAuth();
   const [page, setPage] = useState("overview");
   const [mobile, setMobile] = useState(false);
+  const [composeType, setComposeType] = useState<MessageType>("text");
   const sessions = useResource<{ sessions: Session[] }>("/sessions");
   const navigate = (value: string) => {
+    if (value === "compose") setComposeType("text");
     setPage(value);
     setMobile(false);
   };
@@ -61,7 +66,7 @@ function Dashboard() {
           <span className="brand-icon">
             <MessageCircle size={22} />
           </span>
-          wapp<span className="brand-dot">.</span>
+          WappHub<span className="brand-dot">.</span>
         </a>
         <div className="workspace-label">
           <span>WORKSPACE</span>
@@ -168,11 +173,25 @@ function Dashboard() {
               error={sessions.error}
             />
           ) : page === "compose" ? (
-            <ComposePage sessions={rows} onSent={sessions.refresh} />
+            <ComposePage
+              sessions={rows}
+              onSent={sessions.refresh}
+              onManageSessions={() => navigate("sessions")}
+              initialType={composeType}
+            />
           ) : page === "messages" ? (
             <HistoryPage key="messages" kind="messages" />
           ) : page === "schedules" ? (
             <HistoryPage key="schedules" kind="schedules" />
+          ) : page === "polls" ? (
+            <PollsPage
+              sessions={rows}
+              onCompose={() => {
+                setComposeType("poll");
+                setPage("compose");
+                setMobile(false);
+              }}
+            />
           ) : page === "users" && user?.role === "admin" ? (
             <UsersPage />
           ) : page === "account" ? (
@@ -181,7 +200,7 @@ function Dashboard() {
             <IntegrationsPage />
           )}
           <footer className="app-footer">
-            <span>Wapp · Conexões organizadas, conversas melhores.</span>
+            <span>WappHub · Conexões organizadas, conversas melhores.</span>
             <span>Open source · v1.0</span>
           </footer>
         </main>

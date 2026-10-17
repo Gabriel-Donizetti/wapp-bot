@@ -5,6 +5,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/health": "http://127.0.0.1:3000",
+      "/integration-guide": "http://127.0.0.1:3000",
       "/api": "http://127.0.0.1:3000",
       "/docs": "http://127.0.0.1:3000",
       "/openapi.json": "http://127.0.0.1:3000",

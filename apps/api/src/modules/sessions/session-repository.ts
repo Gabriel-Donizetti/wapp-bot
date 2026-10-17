@@ -60,7 +60,7 @@ export class SessionRepository {
           "Aguarde o envio em andamento.",
         );
       await client.query(
-        "UPDATE schedules SET status='cancelled', error='Sessão removida.' WHERE session_id=$1 AND status='pending'",
+        "UPDATE schedules SET status='cancelled',payload=NULL, error='Sessão removida.' WHERE session_id=$1 AND status='pending'",
         [id],
       );
       await client.query("UPDATE sessions SET deleted_at=NOW() WHERE id=$1", [

@@ -44,8 +44,8 @@ export async function importSqlite(pool: Pool, path: string) {
           [row.sessionId],
         );
         await client.query(
-          `INSERT INTO schedules(id,session_id,recipient,text,send_at,status,created_at,sent_at,whatsapp_message_id,error)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          `INSERT INTO schedules(id,session_id,recipient,text,send_at,status,created_at,sent_at,whatsapp_message_id,error,content)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,jsonb_build_object('type','text','text',$4::text))`,
           [
             row.id,
             row.sessionId,

@@ -13,6 +13,9 @@ import { Scheduler } from "./modules/schedules/scheduler.js";
 import { ScheduleRepository } from "./modules/schedules/schedule-repository.js";
 import { MessageRepository } from "./modules/messages/message-repository.js";
 import { MessageService } from "./modules/messages/message-service.js";
+import { DeliveryRepository } from "./modules/messages/delivery-repository.js";
+import { DeliveryMonitor } from "./modules/messages/delivery-monitor.js";
+import { prepareShutdown } from "./http/server-lifecycle.js";
 import { buildApp } from "./app.js";
 
 const config = readConfig();
@@ -27,6 +30,8 @@ const auth = new AuthService(
 const sessionRepository = new SessionRepository(pool);
 const schedules = new ScheduleRepository(pool);
 const messages = new MessageRepository(pool);
+const receipts = new DeliveryRepository(pool);
+let deliveryMonitor: DeliveryMonitor;
 const authPath = join(config.DATA_DIR, "auth");
 const sessions = new Sessions(
   sessionRepository,
@@ -34,6 +39,18 @@ const sessions = new Sessions(
   authPath,
   (error, sessionId) =>
     log.error({ err: error, sessionId }, "Falha na sessão WhatsApp"),
+  {
+    receipt: (receipt) => receipts.observe(receipt),
+    ready: async () => {
+      await deliveryMonitor?.tick();
+    },
+  },
+);
+deliveryMonitor = new DeliveryMonitor(receipts, sessions, (error, sessionId) =>
+  log.error(
+    { err: error, sessionId },
+    "Falha ao consultar confirmação de envio",
+  ),
 );
 const scheduler = new Scheduler(schedules, sessions);
 const app = buildApp({
@@ -49,16 +66,14 @@ const app = buildApp({
 });
 let server: ReturnType<typeof app.listen> | undefined;
 let lease: PoolClient | undefined;
+let drainHttp: (() => Promise<void>) | undefined;
 let stopping = false;
 const shutdown = async () => {
   if (stopping) return;
   stopping = true;
-  const drain = server
-    ? new Promise<void>((resolve, reject) =>
-        server!.close((error) => (error ? reject(error) : resolve())),
-      )
-    : Promise.resolve();
+  const drain = drainHttp?.() ?? Promise.resolve();
   await scheduler.stop();
+  await deliveryMonitor.stop();
   await drain;
   await sessions.close();
   if (lease) {
@@ -103,12 +118,14 @@ try {
   await scheduler.start(config.SCHEDULER_INTERVAL_MS, (error) =>
     log.error({ err: error }, "Falha no agendador"),
   );
+  deliveryMonitor.start();
   server = app.listen(config.PORT, config.HOST);
+  drainHttp = prepareShutdown(server);
   await new Promise<void>((resolve, reject) => {
     server!.once("listening", resolve);
     server!.once("error", reject);
   });
-  log.info({ host: config.HOST, port: config.PORT }, "Wapp API disponível");
+  log.info({ host: config.HOST, port: config.PORT }, "WappHub API disponível");
   for (const record of await sessionRepository.list())
     void sessions
       .start(record.id)

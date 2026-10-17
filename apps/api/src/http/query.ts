@@ -8,7 +8,18 @@ export const historyQuery = z.object({
   ...pagination,
   sessionId: sessionIdSchema.optional(),
   status: z
-    .enum(["pending", "sending", "sent", "failed", "unknown", "cancelled"])
+    .enum([
+      "pending",
+      "sending",
+      "submitted",
+      "sent",
+      "delivered",
+      "read",
+      "played",
+      "failed",
+      "unknown",
+      "cancelled",
+    ])
     .optional(),
 });
 export const idParam = (params: unknown) =>

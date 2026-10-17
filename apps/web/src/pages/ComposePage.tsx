@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   CalendarClock,
   Check,
@@ -8,10 +8,25 @@ import {
   Users,
   UserRound,
 } from "lucide-react";
-import type { Directory, Message, Session } from "@wapp/contracts";
-import { api } from "../lib/api";
+import type {
+  Directory,
+  Message,
+  Schedule,
+  Session,
+  MessageType,
+  SendMessageRequest,
+} from "@wapp/contracts";
+import { DeliveryStatus } from "../components/delivery-status";
+import { api, ApiError } from "../lib/api";
 import { useResource } from "../lib/use-resource";
-import { Empty, ErrorBox, Loading, useAction } from "../components/ui";
+import { Badge, Empty, ErrorBox, Loading, useAction } from "../components/ui";
+import {
+  MessageFields,
+  messageTypeLabels,
+  hasCaption,
+  readMessageContent,
+  readSendOptions,
+} from "../components/message-fields";
 const normalize = (value: string) =>
   value
     .normalize("NFD")
@@ -20,29 +35,53 @@ const normalize = (value: string) =>
 export function ComposePage({
   sessions,
   onSent,
+  onManageSessions,
+  initialType = "text",
 }: {
   sessions: Session[];
   onSent: () => void;
+  onManageSessions: () => void;
+  initialType?: MessageType;
 }) {
-  const [chosen, setChosen] = useState("");
+  const [chosen, setChosen] = useState<string | null>(null);
   const [to, setTo] = useState("");
+  const [messageType, setMessageType] = useState<MessageType>(initialType);
   const [text, setText] = useState("");
   const [kind, setKind] = useState("all");
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState("now");
   const [sendAt, setSendAt] = useState("");
-  const sessionId =
-    chosen ||
+  const preferredSessionId =
     sessions.find((session) => session.status === "ready")?.id ||
     sessions[0]?.id ||
     "";
-  const ready =
-    sessions.find((session) => session.id === sessionId)?.status === "ready";
+  useEffect(() => {
+    if (preferredSessionId)
+      setChosen((current) => current ?? preferredSessionId);
+  }, [preferredSessionId]);
+  const sessionId = chosen ?? preferredSessionId;
+  const selectedSession = sessions.find((session) => session.id === sessionId);
+  const ready = selectedSession?.status === "ready";
+  const connecting =
+    selectedSession &&
+    ["starting", "authenticated"].includes(selectedSession.status);
   const directory = useResource<Directory>(
     sessionId && ready ? `/sessions/${sessionId}/directory` : null,
-    0,
+    15_000,
   );
   const action = useAction();
+  const [failedRequestId, setFailedRequestId] = useState<string | null>(null);
+  const [tracking, setTracking] = useState<{
+    kind: "messages" | "schedules";
+    id: string;
+    initial?: Message | Schedule;
+  } | null>(null);
+  const delivery = useResource<Message | Schedule>(
+    tracking ? `/${tracking.kind}/${tracking.id}` : null,
+    2000,
+  );
+  const tracked = delivery.data ?? tracking?.initial;
+
   const attempt = useRef<{ payload: string; key: string } | null>(null);
   const recipients = useMemo(
     () => [
@@ -72,38 +111,74 @@ export function ComposePage({
   const selected = recipients.find((item) => item.id === to);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    const form = new FormData(event.currentTarget as HTMLFormElement);
     void action.run(
       async () => {
-        const input = { sessionId, to, text };
+        const content = await readMessageContent(messageType, form, text);
+        const options = readSendOptions(form);
+        const input: SendMessageRequest = {
+          sessionId,
+          to,
+          ...content,
+          ...(options ? { options } : {}),
+        };
         if (mode === "later") {
           const date = new Date(sendAt);
           if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now())
             throw new Error("Escolha uma data e hora no futuro.");
-          await api("/schedules", {
+          const scheduled = await api<Schedule>("/schedules", {
             method: "POST",
             body: { ...input, sendAt: date.toISOString() },
+          });
+          setTracking({
+            kind: "schedules",
+            id: scheduled.id,
+            initial: scheduled,
           });
         } else {
           const payload = JSON.stringify(input);
           if (attempt.current?.payload !== payload)
             attempt.current = { payload, key: crypto.randomUUID() };
-          const result = await api<Message>("/messages", {
-            method: "POST",
-            body: input,
-            idempotencyKey: attempt.current.key,
-          });
-          if (result.status !== "sent")
+          let result: Message;
+          try {
+            result = await api<Message>("/messages", {
+              method: "POST",
+              body: input,
+              idempotencyKey: attempt.current.key,
+            });
+          } catch (error) {
+            if (
+              error instanceof ApiError &&
+              error.details &&
+              typeof error.details === "object" &&
+              "messageRecordId" in error.details &&
+              typeof error.details.messageRecordId === "string"
+            ) {
+              setTracking({
+                kind: "messages",
+                id: error.details.messageRecordId,
+              });
+              setFailedRequestId(error.details.messageRecordId);
+            }
+            throw error;
+          }
+          setTracking({ kind: "messages", id: result.id, initial: result });
+          setFailedRequestId(null);
+          if (["failed", "unknown"].includes(result.status))
             throw new Error(
-              `Envio ${result.status === "unknown" ? "com resultado incerto" : "não concluído"}. Consulte o histórico antes de tentar novamente.`,
+              result.error ||
+                "O envio não foi confirmado. Confira o acompanhamento abaixo.",
             );
-          attempt.current = null;
+          if (["sent", "delivered", "read", "played"].includes(result.status))
+            attempt.current = null;
         }
         setText("");
+        setMessageType("text");
         onSent();
       },
       mode === "later"
         ? "Mensagem agendada com sucesso."
-        : "Mensagem enviada ao WhatsApp.",
+        : "Envio registrado. Acompanhe a confirmação abaixo.",
     );
   };
   return (
@@ -114,7 +189,7 @@ export function ComposePage({
           <h1>Nova mensagem</h1>
           <p>Escolha o destino. Envie agora ou programe para depois.</p>
         </div>
-        <span className="subtle-tag">Somente texto</span>
+        <span className="subtle-tag">Texto e mídia</span>
       </div>
       <div className="compose-grid">
         <section className="card recipient-panel">
@@ -123,6 +198,7 @@ export function ComposePage({
             <button
               className="icon-button"
               aria-label="Atualizar contatos e grupos"
+              disabled={!ready || directory.loading}
               onClick={directory.refresh}
             >
               <RefreshCw size={16} />
@@ -147,6 +223,12 @@ export function ComposePage({
               ))}
             </select>
           </label>
+          {selectedSession ? (
+            <div className="recipient-session-status">
+              <Badge status={selectedSession.status} />
+            </div>
+          ) : null}
+          <ErrorBox message={selectedSession?.error ?? undefined} />
           <div className="segmented">
             {[
               ["all", "Todos"],
@@ -188,19 +270,75 @@ export function ComposePage({
             <ErrorBox key={warning.source} message={warning.message} />
           ))}
           <div className="recipient-summary">
-            {directory.data?.contacts.length || 0} contatos salvos ·{" "}
-            {directory.data?.groups.length || 0} grupos
+            {ready && directory.data
+              ? `${directory.data.warnings.some((item) => item.source === "contacts") ? "—" : directory.data.contacts.length} contatos salvos · ${directory.data.warnings.some((item) => item.source === "groups") ? "—" : directory.data.groups.length} grupos`
+              : ready && directory.loading
+                ? "Carregando contatos e grupos…"
+                : ready && directory.error
+                  ? "Contatos e grupos indisponíveis"
+                  : "Lista disponível quando a sessão estiver pronta"}
           </div>
-          <div className="recipient-list">
-            {!ready ? (
-              <Empty title="Conecte uma sessão">
-                Os contatos aparecem após a conexão com o WhatsApp.
+          <div
+            className="recipient-list"
+            aria-busy={Boolean(
+              connecting || (directory.loading && !directory.data),
+            )}
+          >
+            {connecting ? (
+              <>
+                <Loading />
+                <Empty
+                  title={
+                    selectedSession.status === "authenticated"
+                      ? "Sincronizando WhatsApp"
+                      : "Iniciando sessão"
+                  }
+                >
+                  Aguarde a conexão terminar. Os contatos e grupos aparecerão
+                  automaticamente.
+                </Empty>
+                <button className="secondary" onClick={onManageSessions}>
+                  Gerenciar sessão
+                </button>
+              </>
+            ) : !ready ? (
+              <Empty
+                title={
+                  !selectedSession
+                    ? "Selecione uma sessão"
+                    : selectedSession.status === "qr"
+                      ? "Leia o QR Code"
+                      : "Sessão desconectada"
+                }
+              >
+                {selectedSession?.status === "qr"
+                  ? "Abra Sessões e leia o QR Code com seu WhatsApp."
+                  : "Abra Sessões para conectar ou reconectar o número."}
+                <button className="secondary" onClick={onManageSessions}>
+                  Gerenciar sessões
+                </button>
               </Empty>
-            ) : directory.loading ? (
+            ) : directory.loading && !directory.data ? (
               <Loading />
+            ) : directory.error && !directory.data ? (
+              <Empty title="Não foi possível carregar a lista">
+                Tente novamente. A consulta também será repetida
+                automaticamente.
+                <button className="secondary" onClick={directory.refresh}>
+                  Tentar novamente
+                </button>
+              </Empty>
             ) : !filtered.length ? (
-              <Empty title="Nenhum resultado">
-                Tente outro nome ou número.
+              <Empty
+                title={
+                  recipients.length
+                    ? "Nenhum resultado"
+                    : "Nenhum destinatário disponível"
+                }
+              >
+                {recipients.length
+                  ? "Tente outro nome ou número."
+                  : "Atualize a lista ou confira os avisos de contatos e grupos acima."}
               </Empty>
             ) : (
               filtered.slice(0, 100).map((item) => (
@@ -257,18 +395,73 @@ export function ComposePage({
               />
             </label>
             <label>
-              Mensagem
-              <textarea
-                name="text"
-                rows={9}
-                placeholder="Escreva sua mensagem aqui…"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                required
-                maxLength={4096}
-              />
-              <span className="character-count">{text.length} / 4.096</span>
+              Tipo de mensagem
+              <select
+                name="messageType"
+                aria-label="Tipo de mensagem"
+                value={messageType}
+                onChange={(event) => {
+                  setMessageType(event.target.value as MessageType);
+                  setText("");
+                }}
+              >
+                {Object.entries(messageTypeLabels).map(([type, label]) => (
+                  <option key={type} value={type}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </label>
+            <MessageFields key={messageType} type={messageType} />
+            {messageType === "text" || hasCaption(messageType) ? (
+              <label>
+                {messageType === "text" ? "Mensagem" : "Legenda (opcional)"}
+                <textarea
+                  name="text"
+                  rows={9}
+                  placeholder="Escreva sua mensagem aqui…"
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  required={messageType === "text"}
+                  maxLength={4096}
+                />
+                <span className="character-count">{text.length} / 4.096</span>
+              </label>
+            ) : null}
+            <details>
+              <summary>Responder a uma mensagem e adicionar menções</summary>
+              <div className="stack">
+                <label>
+                  ID da mensagem citada
+                  <input
+                    name="replyTo"
+                    maxLength={512}
+                    placeholder="ID do WhatsApp, disponível na mesma conversa"
+                  />
+                </label>
+                <label>
+                  IDs dos usuários mencionados
+                  <textarea
+                    name="mentions"
+                    rows={2}
+                    placeholder="5511999999999@c.us"
+                  />
+                </label>
+                <label>
+                  Grupos mencionados
+                  <textarea
+                    name="groupMentions"
+                    rows={2}
+                    placeholder="120363000000@g.us|Nome do grupo"
+                  />
+                </label>
+                <small>
+                  Um ID por linha. No texto, use @número para identificar a
+                  menção. O ID citado é messageId, não o ID do registro no
+                  WappHub.
+                </small>
+              </div>
+            </details>
             <div className="delivery-options">
               <button
                 type="button"
@@ -309,13 +502,46 @@ export function ComposePage({
                 </small>
               </label>
             ) : null}
-            {action.feedback}
+            {tracking ? (
+              <section
+                className="delivery-card"
+                aria-label="Acompanhamento da mensagem"
+              >
+                <h3>Acompanhamento da mensagem</h3>
+                {tracked ? (
+                  <DeliveryStatus
+                    item={tracked}
+                    kind={tracking.kind}
+                    onRefresh={delivery.refresh}
+                  />
+                ) : (
+                  <Loading />
+                )}
+                <ErrorBox message={delivery.error} />
+              </section>
+            ) : null}
+            {tracked &&
+            tracking?.kind === "messages" &&
+            ["submitted", "sending"].includes(tracked.status) ? (
+              <ErrorBox message={action.error} />
+            ) : tracking?.id === failedRequestId &&
+              tracked &&
+              ["sent", "delivered", "read", "played"].includes(
+                tracked.status,
+              ) ? (
+              <p role="status">
+                A confirmação chegou após a resposta inicial. O status atual
+                aparece no acompanhamento.
+              </p>
+            ) : (
+              action.feedback
+            )}
             <button
               className="primary full"
               disabled={
                 action.busy ||
                 !sessionId ||
-                !text.trim() ||
+                (messageType === "text" && !text.trim()) ||
                 (mode === "now" && !ready)
               }
             >

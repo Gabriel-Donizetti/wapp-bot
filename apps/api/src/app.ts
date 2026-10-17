@@ -20,7 +20,12 @@ import { ScheduleRepository } from "./modules/schedules/schedule-repository.js";
 import { scheduleRoutes } from "./modules/schedules/schedule-routes.js";
 import { MessageService } from "./modules/messages/message-service.js";
 import { messageRoutes } from "./modules/messages/message-routes.js";
+import { PollRepository } from "./modules/messages/poll-repository.js";
+import { z } from "zod";
+import { pagination } from "./http/query.js";
+import { sessionIdSchema } from "./shared/validation.js";
 import { openapi } from "./http/openapi.js";
+import { integrationGuide } from "./http/integration-guide.js";
 
 export interface Dependencies {
   pool: Pool;
@@ -78,10 +83,13 @@ export function buildApp(deps: Dependencies) {
       exposedHeaders: ["X-Request-ID"],
     }),
   );
-  app.use(express.json({ limit: "32kb" }));
+  app.use(express.json({ limit: "24mb" }));
   app.get("/health", async (_req, res) => {
     await deps.pool.query("SELECT 1");
     res.json({ status: "ok", database: "postgresql" });
+  });
+  app.get("/integration-guide", async (_req, res) => {
+    res.type("html").send(await integrationGuide());
   });
   app.get("/openapi.json", (_req, res) => {
     res.json(openapi);
@@ -90,16 +98,23 @@ export function buildApp(deps: Dependencies) {
     "/docs",
     swaggerUi.serve,
     swaggerUi.setup(openapi, {
-      customSiteTitle: "Wapp API · Documentação",
+      customSiteTitle: "WappHub API · Documentação",
       swaggerOptions: { persistAuthorization: false },
     }),
   );
   app.use("/api/v1/auth", authRoutes(deps.auth));
   const api = express.Router();
   api.use(requireAuth(deps.auth));
+  const polls = new PollRepository(deps.pool);
+  api.get("/polls", async (req, res) => {
+    const query = z
+      .object({ ...pagination, sessionId: sessionIdSchema.optional() })
+      .parse(req.query);
+    res.json(await polls.list(query.sessionId, query.limit, query.offset));
+  });
   api.use("/sessions", sessionRoutes(deps.sessionRepository, deps.sessions));
   api.use("/messages", messageRoutes(deps.messages));
-  api.use("/schedules", scheduleRoutes(deps.schedules));
+  api.use("/schedules", scheduleRoutes(deps.schedules, deps.sessions));
   api.get("/directory", async (_req, res) => {
     const rows = await deps.sessions.list();
     res.json({
@@ -145,49 +160,40 @@ export function buildApp(deps: Dependencies) {
   const errors: ErrorRequestHandler = (error, req, res, _next) => {
     if (res.headersSent) return _next(error);
     if (error instanceof ZodError) {
-      res
-        .status(400)
-        .json({
-          error: "VALIDATION_ERROR",
-          message: "Dados inválidos.",
-          details: error.issues,
-          requestId: req.id,
-        });
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Dados inválidos.",
+        details: error.issues,
+        requestId: req.id,
+      });
       return;
     }
     if (error instanceof AppError) {
-      res
-        .status(error.statusCode)
-        .json({
-          error: error.code,
-          message: error.message,
-          ...(error.details ? { details: error.details } : {}),
-          requestId: req.id,
-        });
+      res.status(error.statusCode).json({
+        error: error.code,
+        message: error.message,
+        ...(error.details ? { details: error.details } : {}),
+        requestId: req.id,
+      });
       return;
     }
     if (error.status === 400 || error.status === 413) {
-      res
-        .status(error.status)
-        .json({
-          error: "BAD_REQUEST",
-          message:
-            error.status === 413
-              ? "Corpo da requisição muito grande."
-              : "JSON inválido.",
-          requestId: req.id,
-        });
+      res.status(error.status).json({
+        error: "BAD_REQUEST",
+        message:
+          error.status === 413
+            ? "Corpo da requisição muito grande."
+            : "JSON inválido.",
+        requestId: req.id,
+      });
       return;
     }
     req.log.error({ err: error }, "Falha na requisição");
-    res
-      .status(500)
-      .json({
-        error: "INTERNAL_ERROR",
-        message:
-          "Erro interno. Consulte o identificador da requisição nos logs.",
-        requestId: req.id,
-      });
+    res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: "Erro interno. Consulte o identificador da requisição nos logs.",
+      requestId: req.id,
+    });
   };
   app.use(errors);
   return app;

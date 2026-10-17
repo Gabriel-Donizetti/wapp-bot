@@ -40,7 +40,18 @@ export class Scheduler {
         continue;
       let result: Awaited<ReturnType<Sessions["send"]>>;
       try {
-        result = await this.sessions.send(item);
+        result = await this.sessions.send(
+          await this.store.deliveryInput(item.id),
+          async (late) => {
+            await this.store.finish(
+              item.id,
+              "sent",
+              late.messageId,
+              null,
+              late.ack,
+            );
+          },
+        );
       } catch (error) {
         if (error instanceof AppError && error.code === "SESSION_NOT_READY") {
           await this.store.finish(item.id, "pending", null, null);
@@ -58,7 +69,13 @@ export class Scheduler {
         }
         continue;
       }
-      await this.store.finish(item.id, "sent", result.messageId, null);
+      await this.store.finish(
+        item.id,
+        "sent",
+        result.messageId,
+        null,
+        result.ack,
+      );
     }
   }
 

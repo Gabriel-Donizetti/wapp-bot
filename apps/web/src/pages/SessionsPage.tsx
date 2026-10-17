@@ -50,6 +50,25 @@ function SessionCard({
       <ErrorBox message={session.error || qr.error} />
       {action.feedback}
       <div className="session-actions">
+        {session.status === "authenticated" ? (
+          <button
+            className="secondary"
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(async () => {
+                await api(`/sessions/${session.id}/disconnect`, {
+                  method: "POST",
+                });
+                await api(`/sessions/${session.id}/connect`, {
+                  method: "POST",
+                });
+                onChange();
+              })
+            }
+          >
+            <RefreshCw size={14} /> Reiniciar conexão
+          </button>
+        ) : null}
         {["disconnected", "error"].includes(session.status) ? (
           <button
             className="secondary"

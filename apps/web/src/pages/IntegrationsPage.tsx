@@ -16,11 +16,27 @@ export function IntegrationsPage() {
           <h1>API & integrações</h1>
           <p>Conecte outros aplicativos à sua central de mensagens.</p>
         </div>
-        <a className="primary" href="/docs/" target="_blank" rel="noreferrer">
-          <BookOpen size={16} />
-          Documentação
-          <ArrowUpRight size={15} />
-        </a>
+        <div className="page-actions">
+          <a
+            className="primary"
+            href="/integration-guide"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <BookOpen size={16} />
+            Guia de integração
+            <ArrowUpRight size={15} />
+          </a>
+          <a
+            className="secondary"
+            href="/docs/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Swagger / API
+            <ArrowUpRight size={15} />
+          </a>
+        </div>
       </div>
       <div className="integration-hero">
         <span className="eyebrow light">REST API · V1</span>
@@ -46,7 +62,7 @@ export function IntegrationsPage() {
           {
             icon: Send,
             title: "3. Envie com segurança",
-            text: "Informe sessão, destino e texto. Use Idempotency-Key para evitar repetir o mesmo envio.",
+            text: "Informe sessão, destino e o tipo de mensagem. Use Idempotency-Key para evitar repetir o mesmo envio.",
           },
           {
             icon: CalendarClock,
@@ -67,6 +83,11 @@ export function IntegrationsPage() {
         <pre>
           <code>{`curl -X POST ${origin}/api/v1/auth/login \\\n  -H 'Content-Type: application/json' \\\n  -d '{"username":"seu-app","password":"sua-senha"}'\n\ncurl ${origin}/api/v1/sessions \\\n  -H 'Authorization: Bearer SEU_TOKEN_JWT'`}</code>
         </pre>
+        <p>
+          <a href="/integration-guide" target="_blank" rel="noreferrer">
+            Guia de integração com exemplos em cURL, Node.js e Python
+          </a>
+        </p>
         <p className="footnote">
           O token tem validade limitada e pode ser revogado pelo endpoint de
           logout. A documentação interativa contém todas as rotas, parâmetros e

@@ -1,3 +1,10 @@
+import { z } from "zod";
+import {
+  messageBodySchema,
+  scheduleBodySchema,
+  messageTypes,
+  MAX_MEDIA_BYTES,
+} from "../shared/validation.js";
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const json = (schema: object) => ({ "application/json": { schema } });
 const body = (schema: object) => ({ required: true, content: json(schema) });
@@ -19,6 +26,12 @@ const query = (name: string, type = "string") => ({
 const paging = [query("limit", "integer"), query("offset", "integer")];
 const errors = {
   400: response(ref("Error"), "Dados inválidos"),
+  413: response(ref("Error"), "JSON acima de 24 MiB"),
+  500: response(
+    ref("Error"),
+    "Falha interna; preserve a chave de idempotência",
+  ),
+  504: response(ref("Error"), "Tempo excedido antes do envio"),
   401: response(ref("Error"), "Autenticação necessária"),
   403: response(ref("Error"), "Sem permissão"),
   404: response(ref("Error"), "Recurso não encontrado"),
@@ -39,11 +52,223 @@ const operation = (
   responses: { 200: response(schema), ...errors },
   ...extra,
 });
-const messageInput = object({
-  sessionId: string,
-  to: string,
-  text: { type: "string", minLength: 1, maxLength: 4096 },
+const messageInput = z.toJSONSchema(messageBodySchema, {
+  target: "openapi-3.0",
+  io: "input",
 });
+const variants = messageInput.oneOf ?? messageInput.anyOf ?? [];
+const legacyTextInput = structuredClone(variants[0]!);
+if (legacyTextInput.properties) delete legacyTextInput.properties.type;
+legacyTextInput.required = legacyTextInput.required?.filter(
+  (key) => key !== "type",
+);
+const sendInput = {
+  oneOf: [legacyTextInput, ...variants],
+  description:
+    "Use type para escolher o formato. Sem type, aceita texto no formato legado. Mídias: base64 puro, até 16 MiB por arquivo; JSON até 24 MiB. Não aceita URL nem caminho local de arquivo.",
+};
+const typedScheduleInput = z.toJSONSchema(scheduleBodySchema, {
+  target: "openapi-3.0",
+  io: "input",
+});
+const legacyScheduleInput = structuredClone(legacyTextInput);
+legacyScheduleInput.properties = {
+  ...legacyScheduleInput.properties,
+  sendAt: { type: "string", format: "date-time" },
+};
+legacyScheduleInput.required = [
+  ...(legacyScheduleInput.required ?? []),
+  "sendAt",
+];
+const scheduleInput = { oneOf: [legacyScheduleInput, typedScheduleInput] };
+const previewInput = {
+  oneOf: variants.map((variant) => {
+    const schema = structuredClone(variant);
+    if (schema.properties) {
+      delete schema.properties.sessionId;
+      delete schema.properties.to;
+      delete schema.properties.sendAt;
+      if (
+        schema.properties.media &&
+        typeof schema.properties.media === "object" &&
+        "properties" in schema.properties.media
+      ) {
+        const media = schema.properties.media;
+        if (media.properties) {
+          delete media.properties.data;
+          media.properties.size = {
+            type: "integer",
+            minimum: 1,
+            maximum: MAX_MEDIA_BYTES,
+          };
+          media.properties.sha256 = {
+            type: "string",
+            pattern: "^[a-f0-9]{64}$",
+          };
+          media.required = ["mimetype", "size", "sha256"];
+        }
+      }
+    }
+    schema.required = schema.required?.filter(
+      (key) => !["sessionId", "to", "sendAt"].includes(key),
+    );
+    return schema;
+  }),
+};
+const idempotencyHeader = {
+  name: "Idempotency-Key",
+  in: "header",
+  schema: { type: "string", maxLength: 128, pattern: "^[!-~]{1,128}$" },
+  description:
+    "Chave única da operação por usuário. Repetições do mesmo conteúdo retornam o registro anterior, inclusive entre a rota genérica e as rotas por tipo.",
+};
+const sendingResponses = {
+  201: response(
+    ref("Message"),
+    "Operação registrada; consulte status e ack para saber se o envio foi confirmado",
+  ),
+  200: response(
+    ref("Message"),
+    "Estado atual da operação anterior com a mesma chave; pode ainda estar sem confirmação ou ter falhado",
+  ),
+  202: response(
+    ref("Message"),
+    "Envio original ainda em andamento; consulte GET /messages/{id}",
+  ),
+  ...errors,
+};
+const exampleBase = { sessionId: "comercial", to: "5511999999999" };
+const examples: Record<string, object> = {
+  text: { ...exampleBase, text: "Sua solicitação foi recebida." },
+  image: {
+    ...exampleBase,
+    media: {
+      mimetype: "image/png",
+      data: "BASE64_DO_ARQUIVO",
+      filename: "imagem.png",
+    },
+    caption: "Imagem da solicitação",
+  },
+  audio: {
+    ...exampleBase,
+    media: {
+      mimetype: "audio/mpeg",
+      data: "BASE64_DO_ARQUIVO",
+      filename: "audio.mp3",
+    },
+  },
+  voice: {
+    ...exampleBase,
+    media: {
+      mimetype: "audio/ogg",
+      data: "BASE64_DO_ARQUIVO",
+      filename: "voz.ogg",
+    },
+  },
+  video: {
+    ...exampleBase,
+    media: {
+      mimetype: "video/mp4",
+      data: "BASE64_DO_ARQUIVO",
+      filename: "video.mp4",
+    },
+    caption: "Demonstração",
+    asGif: false,
+  },
+  document: {
+    ...exampleBase,
+    media: {
+      mimetype: "application/pdf",
+      data: "BASE64_DO_ARQUIVO",
+      filename: "comprovante.pdf",
+    },
+  },
+  sticker: {
+    ...exampleBase,
+    media: {
+      mimetype: "image/webp",
+      data: "BASE64_DO_ARQUIVO",
+      filename: "figurinha.webp",
+    },
+    name: "WappHub",
+    author: "Minha integração",
+  },
+  location: {
+    ...exampleBase,
+    location: {
+      latitude: -23.5505,
+      longitude: -46.6333,
+      name: "Ponto de encontro",
+      address: "São Paulo",
+    },
+  },
+  contacts: { ...exampleBase, contacts: ["5511999999999@c.us"] },
+  poll: {
+    ...exampleBase,
+    poll: {
+      name: "Qual horário?",
+      options: ["Manhã", "Tarde"],
+      allowMultipleAnswers: false,
+    },
+  },
+};
+const typedSendPaths = Object.fromEntries(
+  messageTypes.map((type) => {
+    const variant = variants.find(
+      (item) =>
+        item.properties?.type &&
+        typeof item.properties.type === "object" &&
+        "enum" in item.properties.type &&
+        item.properties.type.enum?.includes(type),
+    );
+    const schema = structuredClone(variant ?? {});
+    schema.required = schema.required?.filter((key) => key !== "type");
+    return [
+      `/messages/${type}`,
+      {
+        post: operation("Mensagens", `Enviar ${type}`, ref("Message"), {
+          operationId: `send${type[0]!.toUpperCase()}${type.slice(1)}`,
+          description:
+            "O tipo é definido pela rota. Aceita o mesmo payload e opções da rota genérica. A mesma chave de idempotência é compartilhada entre rotas. BASE64_DO_ARQUIVO é um marcador: substitua pelo conteúdo real do arquivo.",
+          parameters: [idempotencyHeader],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": { schema, example: examples[type] },
+            },
+          },
+          responses: sendingResponses,
+        }),
+      },
+    ];
+  }),
+);
+const receiptProperties = {
+  ack: {
+    type: "integer",
+    nullable: true,
+    enum: [-1, 0, 1, 2, 3, 4, null],
+    description:
+      "ACK observado: -1 falha, 0 pendente, 1 servidor, 2 dispositivo, 3 leitura, 4 reprodução. null significa ausência de confirmação.",
+  },
+  submittedAt: {
+    type: "string",
+    format: "date-time",
+    nullable: true,
+    description: "Quando a biblioteca retornou o ID; não confirma envio.",
+  },
+  sentAt: {
+    type: "string",
+    format: "date-time",
+    nullable: true,
+    description: "Primeira observação de ACK de servidor ou superior.",
+  },
+  deliveredAt: { type: "string", format: "date-time", nullable: true },
+  readAt: { type: "string", format: "date-time", nullable: true },
+  playedAt: { type: "string", format: "date-time", nullable: true },
+  lastAckAt: { type: "string", format: "date-time", nullable: true },
+  lastCheckedAt: { type: "string", format: "date-time", nullable: true },
+};
 const userInput = object(
   {
     username: { type: "string", pattern: "^[a-z0-9_.-]{3,64}$" },
@@ -68,10 +293,14 @@ const page = (name: string) =>
 export const openapi = {
   openapi: "3.0.3",
   info: {
-    title: "Wapp API",
-    version: "1.0.0",
+    title: "WappHub API",
+    version: "1.1.0",
     description:
-      "API de um workspace compartilhado para usuários e aplicativos autenticados. Texto, sessões WhatsApp e agendamento. O uso de whatsapp-web.js não oferece garantia contra bloqueio.",
+      "API de um workspace compartilhado para usuários e aplicativos autenticados. Dez tipos de envio, respostas, menções, sessões WhatsApp, contatos, grupos, canais e agendamento. Guia de integração: /integration-guide. Mídias em base64 até 16 MiB; requisições até 24 MiB. O uso de whatsapp-web.js não oferece garantia contra bloqueio.",
+  },
+  externalDocs: {
+    description: "Guia completo de integração",
+    url: "/integration-guide",
   },
   servers: [{ url: "/api/v1" }],
   tags: [
@@ -137,30 +366,101 @@ export const openapi = {
           items: object({ source: string, message: string }),
         },
       }),
+      PollOverview: object({
+        kind: { type: "string", enum: ["messages", "schedules"] },
+        recordId: { type: "string", format: "uuid" },
+        sessionId: string,
+        to: string,
+        poll: object(
+          {
+            name: string,
+            options: { type: "array", items: string },
+            allowMultipleAnswers: { type: "boolean" },
+          },
+          ["name", "options"],
+        ),
+        createdAt: { type: "string", format: "date-time" },
+        startedAt: { type: "string", format: "date-time", nullable: true },
+        sendAt: { type: "string", format: "date-time", nullable: true },
+        messageId: { type: "string", nullable: true },
+        deliveryStatus: string,
+      }),
+      PollResults: object({
+        recordId: { type: "string", format: "uuid" },
+        sessionId: string,
+        messageId: string,
+        name: string,
+        allowMultipleAnswers: { type: "boolean" },
+        totalVoters: { type: "integer" },
+        totalSelections: { type: "integer" },
+        options: {
+          type: "array",
+          items: object({
+            id: { type: "integer" },
+            name: string,
+            votes: { type: "integer" },
+            voters: { type: "array", items: string },
+          }),
+        },
+        votes: {
+          type: "array",
+          items: object({
+            voter: string,
+            selectedOptions: {
+              type: "array",
+              items: object({ id: { type: "integer" }, name: string }),
+            },
+            updatedAt: { type: "string", format: "date-time", nullable: true },
+          }),
+        },
+        fetchedAt: { type: "string", format: "date-time" },
+      }),
+      SendMessage: sendInput,
+      ScheduleInput: scheduleInput,
+      MessageContent: previewInput,
       Message: object({
         id: { type: "string", format: "uuid" },
         sessionId: string,
         to: string,
         text: string,
+        type: { type: "string", enum: [...messageTypes] },
+        content: ref("MessageContent"),
         status: {
           type: "string",
-          enum: ["sending", "sent", "failed", "unknown"],
+          enum: [
+            "sending",
+            "submitted",
+            "sent",
+            "delivered",
+            "read",
+            "played",
+            "failed",
+            "unknown",
+          ],
         },
         messageId: { type: "string", nullable: true },
         error: { type: "string", nullable: true },
         createdAt: { type: "string", format: "date-time" },
-        sentAt: { type: "string", format: "date-time", nullable: true },
+        ...receiptProperties,
       }),
       Schedule: object({
         id: { type: "string", format: "uuid" },
-        ...messageInput.properties,
+        sessionId: string,
+        to: string,
+        text: string,
+        type: { type: "string", enum: [...messageTypes] },
+        content: ref("MessageContent"),
         sendAt: { type: "string", format: "date-time" },
         status: {
           type: "string",
           enum: [
             "pending",
             "sending",
+            "submitted",
             "sent",
+            "delivered",
+            "read",
+            "played",
             "failed",
             "unknown",
             "cancelled",
@@ -169,7 +469,7 @@ export const openapi = {
         messageId: { type: "string", nullable: true },
         error: { type: "string", nullable: true },
         createdAt: { type: "string", format: "date-time" },
-        sentAt: { type: "string", nullable: true, format: "date-time" },
+        ...receiptProperties,
       }),
     },
   },
@@ -353,25 +653,80 @@ export const openapi = {
       ),
       post: operation(
         "Mensagens",
-        "Enviar texto para contato ou grupo",
+        "Enviar uma mensagem e acompanhar a confirmação pelo WhatsApp",
         ref("Message"),
         {
+          operationId: "sendMessage",
           description:
-            "Use Idempotency-Key para repetir a mesma requisição sem reenviar. A chave é vinculada ao usuário. Em resultado unknown, confira o WhatsApp antes de criar outro envio.",
-          parameters: [
-            {
-              name: "Idempotency-Key",
-              in: "header",
-              schema: { type: "string", maxLength: 128 },
-            },
-          ],
-          requestBody: body(messageInput),
-          responses: {
-            201: response(ref("Message"), "Enviado"),
-            200: response(ref("Message"), "Repetição idempotente"),
-            202: response(ref("Message"), "Envio original ainda em andamento"),
-            ...errors,
-          },
+            "Selecione type: text, image, audio, voice, video, document, sticker, location, contacts ou poll. type ausente mantém o texto legado. Use Idempotency-Key; não repita unknown com outra chave. Destinos: telefone com DDI ou ID @c.us, @lid, @g.us ou @newsletter. Canais exigem permissão de publicação e recusam document, location, contacts, audio, respostas, menções e viewOnce.",
+          parameters: [idempotencyHeader],
+          requestBody: body(ref("SendMessage")),
+          responses: sendingResponses,
+        },
+      ),
+    },
+    ...typedSendPaths,
+    "/sessions/{id}/channels": {
+      get: operation(
+        "Sessões",
+        "Listar canais conhecidos pela sessão; a listagem não implica permissão de publicação",
+        page("Group"),
+        { parameters: [id, query("search"), ...paging] },
+      ),
+    },
+    "/messages/{id}/refresh-status": {
+      post: operation(
+        "Mensagens",
+        "Consultar confirmação atual no WhatsApp sem reenviar",
+        ref("Message"),
+        {
+          parameters: [id],
+          description:
+            "Requer sessão ready e ID WhatsApp conhecido. Preserva o status se a mensagem não estiver disponível. Também há acompanhamento automático por ACK e reconciliação periódica.",
+        },
+      ),
+    },
+    "/schedules/{id}/refresh-status": {
+      post: operation(
+        "Agendamentos",
+        "Consultar confirmação de um envio agendado sem reenviar",
+        ref("Schedule"),
+        { parameters: [id] },
+      ),
+    },
+    "/polls": {
+      get: operation(
+        "Mensagens",
+        "Listar enquetes enviadas e agendadas",
+        page("PollOverview"),
+        {
+          description:
+            "Reúne apenas registros do tipo poll. kind informa a origem para consultar respostas em /messages/{recordId}/poll-results ou /schedules/{recordId}/poll-results. startedAt é o horário em que o envio retornou ID, não uma confirmação de entrega; consulte deliveryStatus.",
+          parameters: [query("sessionId"), ...paging],
+        },
+      ),
+    },
+    "/messages/{id}/poll-results": {
+      get: operation(
+        "Mensagens",
+        "Consultar respostas de uma enquete enviada",
+        ref("PollResults"),
+        {
+          parameters: [id],
+          description:
+            "Use o UUID do registro WappHub, não o ID WhatsApp. Requer sessão ready e enquete disponível no histórico local. Retorna a seleção mais recente por participante, incluindo retiradas (selectedOptions vazio). totalVoters conta participantes com seleção ativa; totalSelections soma escolhas. Múltipla escolha pode ter mais seleções que participantes. Snapshot consultado no WhatsApp, sem armazenamento de votos no WappHub; ausência da mensagem gera erro, não zero votos.",
+        },
+      ),
+    },
+    "/schedules/{id}/poll-results": {
+      get: operation(
+        "Agendamentos",
+        "Consultar respostas de uma enquete enviada",
+        ref("PollResults"),
+        {
+          parameters: [id],
+          description:
+            "Use o UUID do registro WappHub, não o ID WhatsApp. Requer sessão ready e enquete disponível no histórico local. Retorna a seleção mais recente por participante, incluindo retiradas (selectedOptions vazio). totalVoters conta participantes com seleção ativa; totalSelections soma escolhas. Múltipla escolha pode ter mais seleções que participantes. Snapshot consultado no WhatsApp, sem armazenamento de votos no WappHub; ausência da mensagem gera erro, não zero votos.",
         },
       ),
     },
@@ -394,15 +749,12 @@ export const openapi = {
       }),
       post: operation(
         "Agendamentos",
-        "Agendar texto em data futura com fuso horário",
+        "Agendar qualquer tipo de mensagem em data futura com fuso horário",
         ref("Schedule"),
         {
-          requestBody: body(
-            object({
-              ...messageInput.properties,
-              sendAt: { type: "string", format: "date-time" },
-            }),
-          ),
+          description:
+            "Mesmo formato do envio imediato mais sendAt (ISO 8601 com Z ou offset, no futuro). O arquivo é preservado no PostgreSQL até envio, falha, incerteza ou cancelamento. Sessões offline aguardam conexão. Esta rota NÃO aceita idempotência: repetir cria outro agendamento. Persista o ID no aplicativo chamador.",
+          requestBody: body(ref("ScheduleInput")),
           responses: { 201: response(ref("Schedule"), "Agendado"), ...errors },
         },
       ),

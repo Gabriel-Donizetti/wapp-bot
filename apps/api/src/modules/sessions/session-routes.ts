@@ -37,6 +37,21 @@ export function sessionRoutes(
     await sessions.remove(idParam(req.params));
     res.sendStatus(204);
   });
+  router.get("/:id/channels", async (req, res) => {
+    const query = z
+      .object({ search: z.string().max(100).default(""), ...pagination })
+      .parse(req.query);
+    const term = normalizeSearch(query.search);
+    const items = (await sessions.channels(idParam(req.params))).filter(
+      (item) => normalizeSearch(`${item.name} ${item.id}`).includes(term),
+    );
+    res.json({
+      data: items.slice(query.offset, query.offset + query.limit),
+      total: items.length,
+      limit: query.limit,
+      offset: query.offset,
+    });
+  });
   router.get("/:id/directory", async (req, res) => {
     res.json(await sessions.directory(idParam(req.params)));
   });

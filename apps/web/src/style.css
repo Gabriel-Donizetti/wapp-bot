@@ -154,6 +154,7 @@ label small {
   min-height: 100vh;
 }
 .sidebar {
+  overflow-y: auto;
   width: 238px;
   flex-shrink: 0;
   background: #153a30;
@@ -166,7 +167,8 @@ label small {
   z-index: 30;
 }
 .sidebar .brand {
-  padding: 0 14px 31px;
+  font-size: 23px;
+  padding: 0 10px 31px;
 }
 .workspace-label {
   margin: 0 8px 29px;
@@ -520,7 +522,7 @@ label small {
 }
 .overview-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 24px;
 }
 .empty {
@@ -1430,4 +1432,132 @@ pre {
     animation: none !important;
     transition: none !important;
   }
+}
+
+.badge.submitted {
+  color: #825f08;
+  background: #fcf6df;
+}
+.badge.delivered {
+  color: #116443;
+  background: #e2f3e9;
+}
+.badge.read,
+.badge.played {
+  color: #14639c;
+  background: #e9f3ff;
+}
+.delivery-status {
+  min-width: 200px;
+  max-width: 420px;
+}
+.delivery-status-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.delivery-warning {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #805f34;
+  margin: 8px 0;
+}
+.delivery-status summary {
+  cursor: pointer;
+  font-size: 12px;
+  margin: 10px 0;
+  color: #577363;
+}
+.receipt-timeline {
+  margin: 10px 0;
+  font-size: 12px;
+}
+.receipt-timeline > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0;
+}
+.receipt-timeline dt {
+  color: #577363;
+}
+.receipt-timeline dd {
+  margin: 0;
+}
+.receipt-id {
+  display: block;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  margin: 4px 0;
+}
+.delivery-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+.delivery-card h3 {
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.poll-responses > button {
+  margin-top: 10px;
+}
+.poll-results {
+  display: grid;
+  gap: 16px;
+}
+.poll-option {
+  display: grid;
+  gap: 6px;
+}
+.poll-option progress {
+  width: 100%;
+  accent-color: var(--green);
+}
+.poll-voter {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.polls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 20px;
+}
+.poll-overview {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.poll-overview .section-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+.poll-overview h3 {
+  margin: 0;
+}
+.poll-overview ul {
+  padding-left: 20px;
+  margin: 16px 0;
+}
+
+.recipient-session-status {
+  margin: -8px 0 16px;
+}
+.recipient-list .empty .secondary {
+  display: flex;
+  margin: 18px auto 0;
+}
+.recipient-list > .secondary {
+  margin: 0 auto 16px;
+  display: flex;
 }
