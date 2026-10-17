@@ -50,10 +50,18 @@ try {
     throw new Error(`Navegação não encontrada: ${label}`);
   };
   await page.goto(base);
+  assert.match(await page.title(), /WappHub/);
   await page.type("input[name=username]", "admin");
   await page.type("input[name=password]", testPassword);
   await page.click(".login-form button.primary");
   await page.waitForSelector(".stats-grid");
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".stat-card:nth-child(2) strong")?.textContent ===
+      "1",
+  );
+  assert.equal(await page.$(".welcome-banner"), null);
+  assert.equal((await page.content()).includes("Últimos envios"), false);
   await page.screenshot({
     path: join(tmpdir(), "wapp-overview.png"),
     fullPage: true,
@@ -78,6 +86,54 @@ try {
   );
   await nav("Nova mensagem");
   await page.waitForSelector(".recipient");
+  client.emit("authenticated");
+  await page.waitForSelector(".recipient-session-status .badge.authenticated");
+  assert.match(
+    await page.$eval(".recipient-list", (node) => node.textContent || ""),
+    /Sincronizando WhatsApp/,
+  );
+  assert.doesNotMatch(
+    await page.$eval(".recipient-summary", (node) => node.textContent || ""),
+    /0 contatos/,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-directory-sync.png"),
+    fullPage: true,
+  });
+  assert.equal(
+    await page.$eval(
+      'select[aria-label="Sessão de origem"]',
+      (node) => (node as HTMLSelectElement).value,
+    ),
+    "comercial",
+  );
+  client.contactsError = true;
+  client.groupsError = true;
+  client.emit("ready");
+  await page.waitForSelector(".recipient-panel .error-box");
+  assert.match(
+    await page.$eval(".recipient-list", (node) => node.textContent || ""),
+    /Não foi possível carregar a lista/,
+  );
+  client.contactsError = false;
+  client.groupsError = false;
+  // Sem clicar em atualizar: a listagem se recupera após uma falha transitória.
+  await page.waitForSelector(".recipient", { timeout: 25_000 });
+  await page.waitForFunction(
+    () => !document.querySelector(".recipient-panel .error-box"),
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-directory-ready.png"),
+    fullPage: true,
+  });
+  await page.select('select[aria-label="Sessão de origem"]', "");
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".recipient-list")
+      ?.textContent?.includes("Selecione uma sessão"),
+  );
+  await page.select('select[aria-label="Sessão de origem"]', "comercial");
+  await page.waitForSelector(".recipient");
   await page.click(".segmented button:nth-child(3)");
   await page.type(
     'input[aria-label="Filtrar grupos pelo nome"]',
@@ -95,11 +151,49 @@ try {
   await page.click(".segmented button:nth-child(2)");
   await page.type(".search-field input", "Cliente");
   await page.click(".recipient");
+  client.resultAck = 0;
   await page.type("textarea[name=text]", "Mensagem pelo React");
   await page.click(".message-panel button.primary");
-  await page.waitForSelector(".success-box");
+  await page.waitForSelector(".delivery-card .badge.submitted");
   assert.equal(client.sent.length, 1);
   assert.equal(client.sent[0]?.text, "Mensagem pelo React");
+  await page.waitForSelector(".delivery-card .badge.submitted");
+  assert.match(
+    await page.$eval(".delivery-card", (node) => node.textContent || ""),
+    /ainda não confirmou/,
+  );
+  const firstMessageId = [...client.messageStates.keys()][0]!;
+  client.emit(
+    "message_ack",
+    { fromMe: true, id: { _serialized: firstMessageId } },
+    2,
+  );
+  await f.sessions.flushReceipts();
+  await page.waitForSelector(".delivery-card .badge.delivered");
+  client.messageStates.get(firstMessageId)!.ack = 3;
+  await page.click(".delivery-card button");
+  await page.waitForSelector(".delivery-card .badge.read");
+  assert.match(
+    await page.$eval(".delivery-card", (node) => node.textContent || ""),
+    /Leitura confirmada/,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-delivery-status.png"),
+    fullPage: true,
+  });
+  await page.setViewport({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-delivery-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewport({ width: 1440, height: 980 });
+  client.resultAck = 1;
   await page.type("textarea[name=text]", "Agendamento pelo React");
   await page.click(".delivery-options button:nth-child(2)");
   const expected = await page.$eval("input[type=datetime-local]", (node) => {
@@ -148,6 +242,17 @@ try {
   await page.waitForSelector(".success-box");
   assert.equal(client.deliveries.at(-1)!.options?.caption, "Imagem pelo React");
   assert.equal(typeof client.deliveries.at(-1)!.content, "object");
+  await page.select('select[name="messageType"]', "document");
+  const documentPath = join(f.dir, "documento.txt");
+  writeFileSync(documentPath, "Documento enviado pelo painel");
+  const documentUpload = await page.$('input[type="file"]');
+  assert.ok(documentUpload);
+  await documentUpload.uploadFile(documentPath);
+  await page.click(".message-panel button.primary");
+  await page.waitForFunction(
+    () => !document.querySelector('input[type="file"]'),
+  );
+  assert.equal(client.deliveries.at(-1)!.options?.sendMediaAsDocument, true);
   await page.select('select[name="messageType"]', "poll");
   await page.type('input[name="pollName"]', "Qual horário?");
   await page.type('textarea[name="pollOptions"]', "Manhã\nTarde");
@@ -159,13 +264,83 @@ try {
         ?.getAttribute("name") === "messageType" &&
       !document.querySelector('input[name="pollName"]'),
   );
-  assert.equal(client.deliveries.length, 3);
+  assert.equal(client.deliveries.length, 4);
+  client.pollVotes = [
+    {
+      voter: "5511888888888@c.us",
+      selectedOptions: [{ id: 0, name: "Manhã" }],
+      interractedAtTs: Date.now(),
+    } as (typeof client.pollVotes)[number],
+  ];
   await nav("Histórico");
+  await page.waitForSelector(".poll-responses button");
+  await page.click(".poll-responses button");
+  await page.waitForSelector(".poll-results");
+  assert.match(
+    await page.$eval(".poll-results", (node) => node.textContent || ""),
+    /1 participante · 1 seleção/,
+  );
+  assert.match(
+    await page.$eval(".poll-results", (node) => node.textContent || ""),
+    /5511888888888@c.us/,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-poll-responses.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".modal", { hidden: true });
   await page.waitForSelector("tbody tr");
+  await page.select('select[aria-label="Filtrar status"]', "read");
+  await page.waitForSelector("tbody .badge.read");
+  assert.equal((await page.$$("tbody tr")).length, 1);
+  await page.select('select[aria-label="Filtrar status"]', "");
+  await page.waitForFunction(
+    () => document.querySelectorAll("tbody tr").length === 4,
+  );
   assert.match(
     await page.$eval("tbody", (node) => node.textContent || ""),
     /Mensagem pelo React/,
   );
+  await nav("Enquetes");
+  await page.waitForSelector(".poll-overview");
+  assert.equal((await page.$$(".poll-overview")).length, 1);
+  assert.match(
+    await page.$eval(".poll-overview", (node) => node.textContent || ""),
+    /Qual horário/,
+  );
+  await page.click(".poll-overview .poll-responses button");
+  await page.waitForSelector(".poll-results");
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-polls-page.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".modal", { hidden: true });
+  await page.click(".page-title button.primary");
+  await page.waitForSelector('input[name="pollName"]');
+  assert.equal(
+    await page.$eval(
+      'select[name="messageType"]',
+      (node) => (node as HTMLSelectElement).value,
+    ),
+    "poll",
+  );
+  await nav("API & integrações");
+  await page.waitForSelector(
+    '.page-title a.primary[href="/integration-guide"]',
+  );
+  const guide = await fetch(base + "/integration-guide");
+  assert.equal(guide.status, 200);
+  assert.match(await guide.text(), /Consultar respostas da enquete/);
+  await page.setViewport({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.setViewport({ width: 1440, height: 980 });
   await nav("Usuários");
   await page.click(".page-title button.primary");
   await page.type(".modal input[name=name]", "Aplicativo teste");
@@ -175,8 +350,11 @@ try {
   await page.waitForFunction(() =>
     document.querySelector(".users-grid")?.textContent?.includes("app-teste"),
   );
+  client.emit("disconnected", "teste");
+  f.clients.get("suporte")!.emit("disconnected", "teste");
   await page.reload();
   await page.waitForSelector(".stats-grid");
+  await page.waitForSelector(".welcome-banner");
   await page.setViewport({ width: 390, height: 844 });
   assert.equal(
     await page.evaluate(
@@ -188,15 +366,34 @@ try {
     path: join(tmpdir(), "wapp-mobile-react.png"),
     fullPage: true,
   });
+  // Aguarda a animação de recolher a barra após a mudança de viewport.
+  await page.waitForFunction(() => {
+    const sidebar = document.querySelector(".sidebar");
+    return sidebar && sidebar.getBoundingClientRect().right <= 0;
+  });
   await page.click('button[aria-label="Abrir menu"]');
+  await page.waitForSelector(".sidebar.open");
+  await page.waitForFunction(() => {
+    const rect = document.querySelector(".logout")?.getBoundingClientRect();
+    return rect && rect.left >= -1 && rect.right <= innerWidth + 1;
+  });
   await page.click(".logout");
   await page.waitForSelector(".login-form");
   await page.goto(base + "/docs/");
   await page.waitForSelector(".swagger-ui .info");
   assert.deepEqual(errors, []);
   console.log(
-    "React + Express + PostgreSQL: login JWT, sessão/QR, filtros sem acentos, envios simulados de texto/imagem/enquete, agendamento/fuso, cancelamento, histórico, criação de usuário, recarga autenticada, logout, Swagger e layout móvel validados.",
+    "React + Express + PostgreSQL: login JWT, sessão/QR, filtros sem acentos, envios simulados de texto/imagem/documento/enquete, respostas de enquetes, guia acessível e home condicional, acompanhamento de submissão/entrega/leitura, consulta direta e filtro por status, agendamento/fuso, cancelamento, histórico, criação de usuário, recarga autenticada, logout, Swagger e layout móvel validados.",
   );
+} catch (error) {
+  const pages = await browser.pages();
+  for (let index = 0; index < pages.length; index++) {
+    await pages[index]!.screenshot({
+      path: join(tmpdir(), `wapp-e2e-failure-${index}.png`),
+      fullPage: true,
+    }).catch(() => {});
+  }
+  throw error;
 } finally {
   await browser.close();
   if (server)

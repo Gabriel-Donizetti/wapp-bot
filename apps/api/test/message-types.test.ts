@@ -337,7 +337,7 @@ test("OpenAPI publica os dez contratos e o guia de integração", async (t) => {
   assert.equal(guide.status, 200);
   assert.match(guide.headers["content-type"] ?? "", /^text\/html/);
   assert.equal(guide.headers["content-disposition"], undefined);
-  assert.match(guide.text, /<h1>Integrar aplicativos com o Wapp<\/h1>/);
+  assert.match(guide.text, /<h1>Integrar aplicativos com o WappHub<\/h1>/);
   assert.match(guide.text, /<table>/);
   assert.match(guide.text, /<pre><code class="language-js">/);
   assert.match(guide.text, /href="\/docs\/"/);

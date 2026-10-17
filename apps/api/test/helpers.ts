@@ -14,6 +14,8 @@ import {
 import { SessionRepository } from "../src/modules/sessions/session-repository.js";
 import { ScheduleRepository } from "../src/modules/schedules/schedule-repository.js";
 import { MessageRepository } from "../src/modules/messages/message-repository.js";
+import { DeliveryRepository } from "../src/modules/messages/delivery-repository.js";
+import { DeliveryMonitor } from "../src/modules/messages/delivery-monitor.js";
 import { MessageService } from "../src/modules/messages/message-service.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
 import { UserRepository } from "../src/modules/auth/user-repository.js";
@@ -28,7 +30,20 @@ export class FakeClient extends EventEmitter {
     content: Parameters<whatsapp.Client["sendMessage"]>[1];
     options?: whatsapp.MessageSendOptions;
   }> = [];
+  resultAck: number | null = 1;
+  earlyAck?: number;
+  messageStates = new Map<
+    string,
+    {
+      id: { _serialized: string; remote: string };
+      fromMe: boolean;
+      type: string;
+      ack: number | null;
+    }
+  >();
   quotedChatId = "5511888888888@c.us";
+  pollVotes: whatsapp.PollVote[] = [];
+  pollVotesError = false;
   quoteMissing = false;
   contactError = false;
   registered = true;
@@ -99,9 +114,15 @@ export class FakeClient extends EventEmitter {
     return { id: { _serialized: id }, isUser: true, isGroup: false };
   }
   async getMessageById(id: string) {
+    if (this.messageStates.has(id) && !this.quoteMissing)
+      return this.messageStates.get(id);
     return this.quoteMissing
       ? null
       : { id: { _serialized: id, remote: this.quotedChatId } };
+  }
+  async getPollVotes(_id: string) {
+    if (this.pollVotesError) throw new Error("Enquete indisponível");
+    return this.pollVotes;
   }
   async sendMessage(
     to: string,
@@ -116,13 +137,29 @@ export class FakeClient extends EventEmitter {
       to,
       text: typeof content === "string" ? content : "[media]",
     });
-    return { id: { _serialized: `message-${this.sent.length}` } };
+    const message = {
+      id: { _serialized: `message-${this.sent.length}`, remote: to },
+      fromMe: true,
+      type:
+        typeof content === "object" && "pollName" in content
+          ? "poll_creation"
+          : "chat",
+      ack: this.resultAck,
+    };
+    this.messageStates.set(message.id._serialized, message);
+    if (this.earlyAck !== undefined)
+      this.emit(
+        "message_ack",
+        { ...message, ack: this.earlyAck },
+        this.earlyAck,
+      );
+    return message;
   }
   asPort() {
     return this as unknown as ClientPort;
   }
 }
-export async function fixture() {
+export async function fixture(options: { sendTimeoutMs?: number } = {}) {
   const url = process.env.TEST_DATABASE_URL;
   if (!url)
     throw new Error(
@@ -145,6 +182,7 @@ export async function fixture() {
     role: "admin",
   });
   const login = await auth.login("admin", testPassword);
+  const receipts = new DeliveryRepository(pool);
   const clients = new Map<string, FakeClient>();
   const sessions = new Sessions(
     sessionRepository,
@@ -154,7 +192,11 @@ export async function fixture() {
       return client.asPort();
     },
     join(dir, "auth"),
+    () => {},
+    { receipt: (receipt) => receipts.observe(receipt) },
+    options.sendTimeoutMs,
   );
+  const monitor = new DeliveryMonitor(receipts, sessions);
   const messages = new MessageService(messageRepository, sessions);
   const app = buildApp({
     pool,
@@ -178,6 +220,8 @@ export async function fixture() {
     schedules,
     messageRepository,
     messages,
+    receipts,
+    monitor,
     async call(
       method: "get" | "post" | "delete",
       path: string,
@@ -201,6 +245,7 @@ export async function fixture() {
       return client;
     },
     async close() {
+      await monitor.stop();
       await sessions.close();
       await pool.end();
       await control.query(`DROP SCHEMA ${schema} CASCADE`);

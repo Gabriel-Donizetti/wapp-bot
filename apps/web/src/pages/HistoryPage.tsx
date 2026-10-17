@@ -4,13 +4,15 @@ import type { Message, Page, Schedule } from "@wapp/contracts";
 import { api } from "../lib/api";
 import { useResource } from "../lib/use-resource";
 import {
-  Badge,
+  statusNames,
   dateTime,
   Empty,
   ErrorBox,
   Loading,
   useAction,
 } from "../components/ui";
+import { PollResponses } from "../components/poll-responses";
+import { DeliveryStatus } from "../components/delivery-status";
 export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
   const [status, setStatus] = useState("");
   const [offset, setOffset] = useState(0);
@@ -60,24 +62,28 @@ export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
                 ? [
                     "pending",
                     "sending",
+                    "submitted",
                     "sent",
+                    "delivered",
+                    "read",
+                    "played",
                     "failed",
                     "unknown",
                     "cancelled",
                   ]
-                : ["sending", "sent", "failed", "unknown"]
+                : [
+                    "sending",
+                    "submitted",
+                    "sent",
+                    "delivered",
+                    "read",
+                    "played",
+                    "failed",
+                    "unknown",
+                  ]
               ).map((value) => (
                 <option key={value} value={value}>
-                  {
-                    {
-                      pending: "Pendente",
-                      sending: "Enviando",
-                      sent: "Enviada",
-                      failed: "Falhou",
-                      unknown: "Verificar envio",
-                      cancelled: "Cancelada",
-                    }[value]
-                  }
+                  {statusNames[value]}
                 </option>
               ))}
             </select>
@@ -112,10 +118,20 @@ export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
                         <strong>{item.sessionId}</strong>
                         <small>{item.to}</small>
                       </td>
-                      <td className="message-cell">{item.text}</td>
+                      <td className="message-cell">
+                        {item.text}
+                        {item.type === "poll" && item.messageId ? (
+                          <PollResponses id={item.id} kind={kind} />
+                        ) : null}
+                      </td>
                       <td>
-                        <Badge status={item.status} />
-                        {item.error ? (
+                        <DeliveryStatus
+                          item={item}
+                          kind={kind}
+                          onRefresh={resource.refresh}
+                          compact
+                        />
+                        {item.error && item.status !== "failed" ? (
                           <small className="row-error">{item.error}</small>
                         ) : null}
                       </td>
@@ -182,9 +198,11 @@ export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
         )}
       </section>
       <p className="footnote">
-        “Enviada” significa que o WhatsApp retornou um ID. Entrega e leitura não
-        são confirmadas. Resultados incertos devem ser conferidos antes de um
-        novo envio.
+        “Enviada ao WhatsApp” exige confirmação do servidor. “Entregue” e “Lida”
+        dependem das confirmações disponibilizadas pelo WhatsApp. Em grupos e
+        canais, o status não substitui confirmações individuais. A ausência de
+        leitura não comprova que a pessoa não leu. A lista atualiza
+        automaticamente.
       </p>
     </>
   );

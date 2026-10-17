@@ -70,7 +70,9 @@ if (command !== "start") {
       "-l",
       join(data, "server.log"),
       "-o",
-      `-h 127.0.0.1 -p ${url.port || "5432"} -k '${socket.replaceAll("'", "'\\''")}'`,
+      // O cluster de desenvolvimento roda com um usuário comum. Evita perder
+      // segmentos POSIX se o sistema limpar IPC ao encerrar uma sessão de login.
+      `-h 127.0.0.1 -p ${url.port || "5432"} -k '${socket.replaceAll("'", "'\\''")}' -c dynamic_shared_memory_type=mmap`,
       "-w",
       "start",
     ])

@@ -31,7 +31,7 @@ export function LoginPage() {
           <span className="brand-icon">
             <MessageCircle size={23} />
           </span>{" "}
-          wapp<span className="brand-dot">.</span>
+          WappHub<span className="brand-dot">.</span>
         </a>
         <div>
           <span className="eyebrow light">CONVERSAS QUE CONECTAM</span>
@@ -50,7 +50,7 @@ export function LoginPage() {
             <ShieldCheck size={18} /> Seu time conectado, com acesso controlado.
           </div>
         </div>
-        <small>Wapp · Open source, feito para integrar.</small>
+        <small>WappHub · Open source, feito para integrar.</small>
       </section>
       <section className="login-form-area">
         <form onSubmit={submit} className="login-form">

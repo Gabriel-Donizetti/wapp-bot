@@ -48,6 +48,12 @@ export function messageRoutes(service: MessageService) {
       ),
     );
   });
+  router.post("/:id/refresh-status", async (req, res) => {
+    res.json(await service.refresh(uuidParam(req.params)));
+  });
+  router.get("/:id/poll-results", async (req, res) => {
+    res.json(await service.pollResults(uuidParam(req.params)));
+  });
   router.get("/:id", async (req, res) => {
     res.json(await service.repository.get(uuidParam(req.params)));
   });

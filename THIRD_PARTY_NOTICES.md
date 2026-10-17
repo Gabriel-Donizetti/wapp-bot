@@ -11,6 +11,6 @@ pacotes e repositórios.
 - [jose](https://github.com/panva/jose): MIT.
 - [Lucide](https://github.com/lucide-icons/lucide): ISC.
 
-Wapp não é afiliado ao WhatsApp ou à Meta. Os nomes e marcas pertencem aos
+WappHub não é afiliado ao WhatsApp ou à Meta. Os nomes e marcas pertencem aos
 respectivos titulares. O uso de um cliente não oficial não garante proteção
 contra restrições ou bloqueio de contas.

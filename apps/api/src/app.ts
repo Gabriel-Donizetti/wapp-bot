@@ -20,6 +20,10 @@ import { ScheduleRepository } from "./modules/schedules/schedule-repository.js";
 import { scheduleRoutes } from "./modules/schedules/schedule-routes.js";
 import { MessageService } from "./modules/messages/message-service.js";
 import { messageRoutes } from "./modules/messages/message-routes.js";
+import { PollRepository } from "./modules/messages/poll-repository.js";
+import { z } from "zod";
+import { pagination } from "./http/query.js";
+import { sessionIdSchema } from "./shared/validation.js";
 import { openapi } from "./http/openapi.js";
 import { integrationGuide } from "./http/integration-guide.js";
 
@@ -94,16 +98,23 @@ export function buildApp(deps: Dependencies) {
     "/docs",
     swaggerUi.serve,
     swaggerUi.setup(openapi, {
-      customSiteTitle: "Wapp API · Documentação",
+      customSiteTitle: "WappHub API · Documentação",
       swaggerOptions: { persistAuthorization: false },
     }),
   );
   app.use("/api/v1/auth", authRoutes(deps.auth));
   const api = express.Router();
   api.use(requireAuth(deps.auth));
+  const polls = new PollRepository(deps.pool);
+  api.get("/polls", async (req, res) => {
+    const query = z
+      .object({ ...pagination, sessionId: sessionIdSchema.optional() })
+      .parse(req.query);
+    res.json(await polls.list(query.sessionId, query.limit, query.offset));
+  });
   api.use("/sessions", sessionRoutes(deps.sessionRepository, deps.sessions));
   api.use("/messages", messageRoutes(deps.messages));
-  api.use("/schedules", scheduleRoutes(deps.schedules));
+  api.use("/schedules", scheduleRoutes(deps.schedules, deps.sessions));
   api.get("/directory", async (_req, res) => {
     const rows = await deps.sessions.list();
     res.json({

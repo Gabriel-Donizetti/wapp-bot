@@ -1,5 +1,38 @@
 # Migração e operação
 
+## Compatibilidade do envio de mídia
+
+A versão `whatsapp-web.js@1.34.7` recebe correções locais por
+`scripts/patch-whatsapp.mjs`, executado pelo `postinstall` do `npm install` e
+`npm ci`, inclusive no build Docker:
+
+- Remove o `__x_id` privado de `MediaData` antes de criar o modelo da mensagem.
+  Evita o erro `Data passed to getter must include an id property`.
+- Aceita o identificador de mensagem renomeado de `_serialized` para `$1` no
+  WhatsApp Web atual, tanto na consulta após envio quanto na resposta pública.
+
+Se a sessão permanecer em **Sincronizando**, é possível reiniciar a conexão em
+**Sessões**, sem apagar o perfil. O formulário de envio distingue inicialização,
+leitura de QR, sincronização, desconexão e falha da consulta. Quando a sessão
+fica pronta, carrega a lista automaticamente e repete a consulta a cada 15
+segundos; falhas não são apresentadas como zero contatos.
+
+O mesmo script trata a [corrida do Puppeteer na exposição de funções](https://github.com/puppeteer/puppeteer/issues/15299):
+um iframe que fecha durante a instalação dos eventos não deve interromper a
+inicialização se a função já estiver instalada na página principal saudável.
+Página fechada, função ausente e erros de outra natureza continuam falhando.
+
+A correção de mídia deriva da [PR 201923](https://github.com/wwebjs/whatsapp-web.js/pull/201923).
+A compatibilidade de IDs segue o diagnóstico da
+[issue 201845](https://github.com/wwebjs/whatsapp-web.js/issues/201845).
+O script é idempotente e recusa versões ou código diferentes do esperado.
+Ao atualizar a biblioteca, revise o script e os testes de compatibilidade;
+não desative os scripts de instalação. Se instalou com `--ignore-scripts`,
+execute `npm run postinstall` antes de iniciar a API.
+
+Falhas no envio mantêm a causa técnica nos logs do servidor e o estado público
+incerto quando não houver confirmação. A correção não reenvia tentativas antigas.
+
 ## Preservar uma instalação local ao passar para Docker
 
 1. Pare a API que utiliza os perfis. Não abra dois Chromium no mesmo perfil.
@@ -89,3 +122,32 @@ Google Chrome é necessário para formatos de vídeo com codecs proprietários.
 O Docker amd64 o inclui; a variante ARM usa Chromium e exige validação dos
 codecs. FFmpeg é incluído nas imagens para figurinhas animadas e deve estar
 instalado no host se esse formato for usado localmente.
+
+## Confirmações de envio e recuperação
+
+`message_receipts` guarda os ACKs por sessão e ID WhatsApp. As consultas juntam
+esses recibos aos envios imediatos e agendados; o status apresentado é derivado
+da confirmação mais forte, sem substituir entrega ou leitura por eventos
+atrasados. O campo interno `sent_at` dos registros antigos preserva o instante
+de submissão e é exposto como `submittedAt`; o `sentAt` público vem do ACK.
+
+A migração 003 cria recibos sem ACK para IDs legados. Não inventa confirmação
+para mensagens antigas. O monitor consulta no máximo 50 pendências por sessão
+e ciclo, a cada 30 segundos, e também roda após a conexão. Voz e áudio podem
+continuar sendo consultados depois de lidos para recuperar a reprodução.
+
+Consultas sem resultado preservam o status anterior. Não conclua falha apenas
+por falta de ACK ou por a mensagem não estar mais disponível no cache da sessão.
+Leitura depende das confirmações expostas pelo WhatsApp. Os horários são de
+observação pelo WappHub, podendo coincidir em uma recuperação tardia.
+
+Timeouts continuam `unknown` até surgir resultado confiável; uma resposta tardia
+no mesmo processo atualiza o registro sem reenviar. A sessão permanece ocupada
+até a chamada original terminar, impedindo remoção do perfil durante o envio.
+Se o processo encerrar antes de conhecer o ID, o resultado pode permanecer
+incerto. Preserve a chave de idempotência e confira a conversa antes de repetir.
+
+O encerramento HTTP aguarda as respostas ativas, incluindo chamadas de envio,
+e fecha conexões de preconnect sem requisição. Isso evita que o recarregamento
+local fique preso aguardando uma conexão ociosa do navegador. A confirmação
+continua sujeita à política de resultados incertos descrita acima.

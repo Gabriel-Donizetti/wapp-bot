@@ -13,7 +13,7 @@ export async function integrationGuide() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Guia de integração · Wapp</title>
+  <title>Guia de integração · WappHub</title>
   <style>
     :root { font-family: system-ui, sans-serif; color: #17352e; background: #f3f7f5; line-height: 1.65; }
     * { box-sizing: border-box; }
@@ -45,7 +45,7 @@ export async function integrationGuide() {
 </head>
 <body>
   <header>
-    <a href="/" aria-label="Voltar ao painel Wapp">WAPP</a>
+    <a href="/" aria-label="Voltar ao painel WappHub">WappHub</a>
     <nav aria-label="Documentação">
       <a href="/">Painel</a>
       <a href="/docs/">Swagger</a>

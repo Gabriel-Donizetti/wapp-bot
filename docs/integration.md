@@ -1,6 +1,6 @@
-# Integrar aplicativos com o Wapp
+# Integrar aplicativos com o WappHub
 
-O Wapp fornece uma API REST para conectar sessões WhatsApp e enviar mensagens
+O WappHub fornece uma API REST para conectar sessões WhatsApp e enviar mensagens
 imediatas ou agendadas. A base local é `http://127.0.0.1:3000/api/v1`.
 O painel de desenvolvimento também encaminha a API em `http://127.0.0.1:5173`.
 
@@ -112,7 +112,8 @@ Todas exigem `sessionId`, `to` e os campos do tipo escolhido.
 A rota genérica continua aceitando o formato legado
 `{sessionId, to, text}`, sem `type`.
 Botões e listas depreciados não são expostos. Recebimento, gestão de grupos,
-bloqueios, reações, voto em enquetes e comunidades estão fora deste escopo.
+bloqueios, reações, envio de votos em enquetes e comunidades estão fora deste escopo.
+A consulta de respostas das enquetes enviadas está disponível.
 
 ### Texto
 
@@ -200,7 +201,7 @@ cujo suporte de vídeo precisa ser validado no ambiente.
 Figurinhas aceitam `image/webp`, `image/png`, `image/jpeg` ou `video/mp4`.
 Conversões animadas requerem FFmpeg instalado no host; a imagem Docker já o
 inclui. `name` e `author` identificam o pacote, e `categories` recebe emojis.
-O limite de 16 MiB é do Wapp; formatos, codecs, duração e limites adicionais do
+O limite de 16 MiB é do WappHub; formatos, codecs, duração e limites adicionais do
 WhatsApp podem impedir o envio mesmo que o JSON seja válido.
 
 ### Localização, contatos e enquete
@@ -252,6 +253,79 @@ contatos arbitrários ou importação de arquivos vCard.
 A pergunta aceita até 255 caracteres; cada opção aceita até 100. Opções que só
 diferem por espaços nas pontas ou maiúsculas são consideradas repetidas.
 
+### Consultar respostas da enquete
+
+No painel, use **Enquetes** no menu lateral. A área reúne os envios imediatos e
+os agendamentos, permite filtrar pela sessão e oferece **Ver respostas da enquete**.
+O botão **Nova enquete** abre o formulário com o tipo Enquete selecionado.
+As respostas também continuam acessíveis pelo Histórico e por Agendamentos.
+
+Na API, `GET /polls` lista somente enquetes, com filtros `sessionId`, `limit` e
+`offset`. Cada item informa `kind` (`messages` ou `schedules`), `recordId`,
+`sessionId`, `to`, `poll`, `deliveryStatus`, `messageId`, `createdAt`, `startedAt`
+e `sendAt`. `startedAt` indica quando o envio retornou um ID; a confirmação
+continua sendo informada por `deliveryStatus`. Agendamentos ainda não enviados
+não possuem respostas para consultar.
+
+Depois de enviar a enquete, guarde o `id` retornado pelo WappHub e consulte:
+
+```sh
+curl "$BASE/messages/UUID_DO_REGISTRO/poll-results" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Para uma enquete agendada já enviada, use
+`GET /schedules/UUID_DO_AGENDAMENTO/poll-results`. Ambas exigem JWT e sessão
+`ready`. Os IDs dessas rotas são os UUIDs do WappHub, não o `messageId` WhatsApp.
+
+Exemplo de resposta com múltiplas escolhas:
+
+```json
+{
+  "recordId": "UUID_DO_REGISTRO",
+  "sessionId": "comercial",
+  "messageId": "ID_WHATSAPP",
+  "name": "Qual horário?",
+  "allowMultipleAnswers": true,
+  "totalVoters": 1,
+  "totalSelections": 2,
+  "options": [
+    { "id": 0, "name": "Manhã", "votes": 1, "voters": ["5511999999999@c.us"] },
+    { "id": 1, "name": "Tarde", "votes": 1, "voters": ["5511999999999@c.us"] }
+  ],
+  "votes": [
+    {
+      "voter": "5511999999999@c.us",
+      "selectedOptions": [
+        { "id": 0, "name": "Manhã" },
+        { "id": 1, "name": "Tarde" }
+      ],
+      "updatedAt": "2030-10-20T12:10:00.000Z"
+    }
+  ],
+  "fetchedAt": "2030-10-20T12:11:00.000Z"
+}
+```
+
+A consulta usa [getPollVotes](https://docs.wwebjs.dev/Client.html#getPollVotes)
+e retorna as respostas disponíveis no histórico local do WhatsApp conectado.
+O WappHub não armazena os votos; cada consulta busca um retrato atual. A mensagem
+precisa estar disponível: se não estiver, a API responde `POLL_UNAVAILABLE`,
+sem afirmar que não há votos. Mensagens de outros tipos geram `NOT_A_POLL`;
+enquetes sem ID de envio geram `POLL_NOT_SENT`.
+
+`totalVoters` conta participantes com pelo menos uma escolha ativa.
+`totalSelections` soma escolhas e pode superar o número de participantes.
+Cada participante aparece uma vez, com sua seleção mais recente.
+Uma retirada de voto aparece com `selectedOptions: []` e não entra nos totais.
+IDs de participante podem terminar em `@c.us` ou `@lid`; não os converta
+automaticamente em números de telefone. `updatedAt` informa o horário retornado
+pelo WhatsApp ou `null` se indisponível; `fetchedAt` é o horário da consulta.
+
+No painel, abra **Histórico** ou **Agendamentos** e clique em
+**Ver respostas da enquete**. A janela mostra totais e escolhas por participante,
+com atualização automática a cada 15 segundos enquanto estiver aberta.
+
 ### Respostas e menções
 
 Adicione `options` ao corpo da mensagem:
@@ -265,7 +339,7 @@ Adicione `options` ao corpo da mensagem:
 ```
 
 `replyTo` é o ID serializado do WhatsApp (`messageId` retornado pelo envio), e
-não o UUID `id` do histórico Wapp. A mensagem citada precisa estar disponível
+não o UUID `id` do histórico WappHub. A mensagem citada precisa estar disponível
 na sessão e pertencer à conversa de destino. Uma referência inválida retorna
 `422 INVALID_REPLY` antes de enviar; a API não descarta silenciosamente a
 citação. Como não há recebimento exposto nesta etapa, a API não lista IDs de
@@ -281,7 +355,8 @@ Envie `Idempotency-Key` nos envios imediatos. A chave contém 1 a 128 caracteres
 ASCII visíveis e identifica uma operação por usuário, compartilhada entre
 `/messages` e `/messages/{tipo}`. Persista chave e payload no aplicativo chamador.
 
-- `201`: nova operação concluída com um ID WhatsApp.
+- `201`: nova operação registrada com ID WhatsApp. Isso, isoladamente, não
+  confirma envio: verifique `status` e `ack` na resposta.
 - `200`: registro de uma operação anterior com a mesma chave e conteúdo.
   Confira `status`: a operação anterior pode ter falhado ou ficar incerta.
 - `202`: a operação original ainda está em andamento.
@@ -298,18 +373,62 @@ com filtros `sessionId`, `status`, `limit` e `offset`. A resposta inclui `type`,
 `status`, `messageId`, datas e erro. O base64 não aparece nas respostas nem é
 armazenado no histórico imediato; mídia contém MIME, nome, tamanho e SHA-256.
 
-| Estado      | Significado                                                             |
-| ----------- | ----------------------------------------------------------------------- |
-| `pending`   | Agendamento aguardando horário/conexão.                                 |
-| `sending`   | Operação reservada e ainda em andamento.                                |
-| `sent`      | WhatsApp retornou um ID; não confirma entrega ou leitura.               |
-| `failed`    | Falha antes de chamar o envio, como sessão offline ou citação inválida. |
-| `unknown`   | O envio pode ter ocorrido; confira o WhatsApp antes de repetir.         |
-| `cancelled` | Agendamento cancelado.                                                  |
+| Estado      | Significado                                                          |
+| ----------- | -------------------------------------------------------------------- |
+| `pending`   | Agendamento aguardando horário ou conexão.                           |
+| `sending`   | Chamada de envio em andamento, ainda sem resposta.                   |
+| `submitted` | A sessão gerou um ID, mas falta confirmação do servidor.             |
+| `sent`      | O servidor WhatsApp confirmou o envio (ACK 1). Não confirma entrega. |
+| `delivered` | O WhatsApp informou entrega ao dispositivo (ACK 2).                  |
+| `read`      | O WhatsApp informou leitura (ACK 3).                                 |
+| `played`    | O WhatsApp informou reprodução (ACK 4).                              |
+| `failed`    | Falha antes do envio ou erro explícito do WhatsApp (ACK -1).         |
+| `unknown`   | A chamada terminou sem resultado confiável. Pode ter enviado.        |
+| `cancelled` | Agendamento cancelado.                                               |
 
-Interrupções durante envio são recuperadas como `unknown`, sem retry
-automático. Falhas do banco depois de enviar podem deixar `sending` até a
-recuperação no reinício. Preserve a mesma chave e consulte o registro.
+`ack` pode ser `null` (sem confirmação), `0` (pendente), `1` (servidor), `2`
+(dispositivo), `3` (leitura), `4` (reprodução) ou `-1` (falha). Para considerar
+envio confirmado, aceite `sent`, `delivered`, `read` ou `played`; para entrega
+confirmada, aceite `delivered`, `read` ou `played`. Nunca use apenas o HTTP 201
+ou a existência de `messageId` como confirmação de envio.
+
+A resposta inclui `submittedAt`, `sentAt`, `deliveredAt`, `readAt`, `playedAt`,
+`lastAckAt` e `lastCheckedAt`. Os horários registram quando o WappHub observou cada
+etapa, não o horário exato em que ela ocorreu no aparelho remoto. Etapas ainda
+não confirmadas retornam `null`. Um ACK de etapa superior também comprova as
+anteriores; os horários observados podem coincidir.
+
+A API escuta `message_ack`, persiste os recibos por sessão e ID WhatsApp e
+consulta mensagens pendentes a cada 30 segundos enquanto a sessão está pronta.
+Ao conectar, também dispara uma consulta de recuperação. Eventos atrasados não
+rebaixam uma entrega/leitura já confirmada. Não são expostas confirmações
+individuais de participantes de grupos nem estatísticas de audiência de canais.
+Leitura e reprodução dependem das confirmações disponibilizadas pelo WhatsApp;
+a ausência de confirmação não comprova ausência de leitura.
+
+Consulte o estado salvo com `GET /messages/{id}` ou `GET /schedules/{id}`.
+Para solicitar uma consulta direta ao WhatsApp, sem reenviar:
+
+- `POST /messages/{id}/refresh-status`.
+- `POST /schedules/{id}/refresh-status`.
+
+Essas rotas exigem sessão `ready` e `messageId` conhecido. Se a mensagem não
+estiver disponível na sessão, retornam `422 RECEIPT_UNAVAILABLE`, preservando o
+estado anterior. Um envio sem ID retorna `409 NO_MESSAGE_RECEIPT`. A consulta
+não cria outra mensagem e não tem efeito de retry.
+
+Interrupções sem ID são recuperadas como `unknown`, sem reenvio automático.
+Se uma chamada ultrapassar o timeout mas retornar depois no mesmo processo,
+o resultado tardio atualiza o registro e associa o ID, sem outro envio. Uma
+falha do banco depois da resposta do WhatsApp pode deixar `sending` até a
+recuperação no reinício; `STATUS_PERSISTENCE_FAILED` inclui
+`details.messageRecordId` e `details.whatsappMessageId`. Preserve a mesma chave
+de idempotência e consulte o registro; não crie outra operação automaticamente.
+
+Mensagens antigas gravadas como `sent` somente pela existência de ID passam a
+aparecer como `submitted` até que um ACK seja observado. `sentAt` agora representa
+confirmação do servidor; o instante anterior passa a aparecer em `submittedAt`.
+Atualize integrações que antes tratavam todo ID como envio confirmado.
 
 ## 6. Agendar qualquer tipo
 
@@ -398,23 +517,23 @@ Formato: `{error, message, requestId, details?}`. Todas as respostas incluem
 `X-Request-ID`. Não exponha senhas, tokens, QR ou conteúdo das mensagens em logs
 do aplicativo integrador.
 
-| HTTP | Exemplos                                                        | Ação                                                          |
-| ---- | --------------------------------------------------------------- | ------------------------------------------------------------- |
-| 400  | `VALIDATION_ERROR`, `BAD_REQUEST`                               | Corrigir formato, limites, MIME ou base64.                    |
-| 401  | Token inválido/expirado/revogado                                | Autenticar novamente.                                         |
-| 403  | Operação exige administrador                                    | Usar conta com permissão.                                     |
-| 404  | `SESSION_NOT_FOUND`, `MESSAGE_NOT_FOUND`                        | Conferir identificador.                                       |
-| 409  | `SESSION_NOT_READY`, `SESSION_BUSY`, `IDEMPOTENCY_CONFLICT`     | Conectar/aguardar ou revisar chave e payload.                 |
-| 413  | `BAD_REQUEST`                                                   | Reduzir JSON para até 24 MiB.                                 |
-| 422  | `NUMBER_NOT_REGISTERED`, `INVALID_REPLY`, `INVALID_CONTACT`     | Corrigir destinatário, citação ou cartão.                     |
-| 429  | Excesso de tentativas de login                                  | Aguardar antes de autenticar de novo.                         |
-| 500  | `INTERNAL_ERROR`                                                | Preservar a chave; consultar histórico e logs pelo requestId. |
-| 502  | `SEND_UNCERTAIN`, `MESSAGE_PREPARATION_FAILED`, falha da agenda | Conferir histórico; unknown não autoriza novo envio.          |
-| 504  | `WHATSAPP_TIMEOUT` antes de enviar                              | Verificar conexão da sessão.                                  |
+| HTTP | Exemplos                                                                           | Ação                                                          |
+| ---- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 400  | `VALIDATION_ERROR`, `BAD_REQUEST`                                                  | Corrigir formato, limites, MIME ou base64.                    |
+| 401  | Token inválido/expirado/revogado                                                   | Autenticar novamente.                                         |
+| 403  | Operação exige administrador                                                       | Usar conta com permissão.                                     |
+| 404  | `SESSION_NOT_FOUND`, `MESSAGE_NOT_FOUND`                                           | Conferir identificador.                                       |
+| 409  | `SESSION_NOT_READY`, `SESSION_BUSY`, `IDEMPOTENCY_CONFLICT`                        | Conectar/aguardar ou revisar chave e payload.                 |
+| 413  | `BAD_REQUEST`                                                                      | Reduzir JSON para até 24 MiB.                                 |
+| 422  | `NUMBER_NOT_REGISTERED`, `INVALID_REPLY`, `INVALID_CONTACT`, `RECEIPT_UNAVAILABLE` | Corrigir destinatário, citação ou cartão.                     |
+| 429  | Excesso de tentativas de login                                                     | Aguardar antes de autenticar de novo.                         |
+| 500  | `INTERNAL_ERROR`                                                                   | Preservar a chave; consultar histórico e logs pelo requestId. |
+| 502  | `SEND_UNCERTAIN`, `MESSAGE_PREPARATION_FAILED`, falha da agenda                    | Conferir histórico; unknown não autoriza novo envio.          |
+| 504  | `WHATSAPP_TIMEOUT` antes de enviar                                                 | Verificar conexão da sessão.                                  |
 
 `GET /health` verifica HTTP e PostgreSQL. Para verificar WhatsApp, consulte o
 estado de cada sessão. Execute uma única API/worker por banco/schema.
-O Wapp usa whatsapp-web.js, uma integração não oficial e sujeita a alterações
+O WappHub usa whatsapp-web.js, uma integração não oficial e sujeita a alterações
 no WhatsApp Web. Não há garantia contra bloqueios. O cliente simulado dos
 testes valida contratos e persistência; formatos e codecs também precisam de
 uma validação real com destinatários de teste autorizados.

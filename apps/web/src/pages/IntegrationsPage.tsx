@@ -16,11 +16,27 @@ export function IntegrationsPage() {
           <h1>API & integrações</h1>
           <p>Conecte outros aplicativos à sua central de mensagens.</p>
         </div>
-        <a className="primary" href="/docs/" target="_blank" rel="noreferrer">
-          <BookOpen size={16} />
-          Documentação
-          <ArrowUpRight size={15} />
-        </a>
+        <div className="page-actions">
+          <a
+            className="primary"
+            href="/integration-guide"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <BookOpen size={16} />
+            Guia de integração
+            <ArrowUpRight size={15} />
+          </a>
+          <a
+            className="secondary"
+            href="/docs/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Swagger / API
+            <ArrowUpRight size={15} />
+          </a>
+        </div>
       </div>
       <div className="integration-hero">
         <span className="eyebrow light">REST API · V1</span>

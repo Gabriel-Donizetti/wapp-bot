@@ -258,7 +258,11 @@ export type MessageInput = import("@wapp/contracts").SendMessageRequest;
 export const scheduleStatuses = [
   "pending",
   "sending",
+  "submitted",
   "sent",
+  "delivered",
+  "read",
+  "played",
   "failed",
   "unknown",
   "cancelled",

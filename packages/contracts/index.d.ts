@@ -114,8 +114,27 @@ export type MessagePreview = {
   poll?: { name: string; options: string[]; allowMultipleAnswers?: boolean };
 };
 export type DeliveryStatus =
-  "pending" | "sending" | "sent" | "failed" | "unknown" | "cancelled";
-export interface Schedule {
+  | "pending"
+  | "sending"
+  | "submitted"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "played"
+  | "failed"
+  | "unknown"
+  | "cancelled";
+export interface DeliveryReceipt {
+  ack: -1 | 0 | 1 | 2 | 3 | 4 | null;
+  submittedAt: string | null;
+  sentAt: string | null;
+  deliveredAt: string | null;
+  readAt: string | null;
+  playedAt: string | null;
+  lastAckAt: string | null;
+  lastCheckedAt: string | null;
+}
+export interface Schedule extends DeliveryReceipt {
   id: string;
   sessionId: string;
   to: string;
@@ -129,7 +148,7 @@ export interface Schedule {
   messageId: string | null;
   error: string | null;
 }
-export interface Message {
+export interface Message extends DeliveryReceipt {
   id: string;
   sessionId: string;
   to: string;
@@ -141,6 +160,34 @@ export interface Message {
   error: string | null;
   createdAt: string;
   sentAt: string | null;
+}
+export interface PollOverview {
+  kind: "messages" | "schedules";
+  recordId: string;
+  sessionId: string;
+  to: string;
+  poll: { name: string; options: string[]; allowMultipleAnswers?: boolean };
+  createdAt: string;
+  startedAt: string | null;
+  sendAt: string | null;
+  messageId: string | null;
+  deliveryStatus: DeliveryStatus;
+}
+export interface PollResults {
+  recordId: string;
+  sessionId: string;
+  messageId: string;
+  name: string;
+  allowMultipleAnswers: boolean;
+  totalVoters: number;
+  totalSelections: number;
+  options: Array<{ id: number; name: string; votes: number; voters: string[] }>;
+  votes: Array<{
+    voter: string;
+    selectedOptions: Array<{ id: number; name: string }>;
+    updatedAt: string | null;
+  }>;
+  fetchedAt: string;
 }
 export interface Page<T> {
   data: T[];

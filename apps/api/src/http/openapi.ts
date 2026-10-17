@@ -125,11 +125,11 @@ const idempotencyHeader = {
 const sendingResponses = {
   201: response(
     ref("Message"),
-    "Mensagem enviada; não confirma entrega/leitura",
+    "Operação registrada; consulte status e ack para saber se o envio foi confirmado",
   ),
   200: response(
     ref("Message"),
-    "Registro de uma operação idempotente anterior, que pode estar sent, failed ou unknown",
+    "Estado atual da operação anterior com a mesma chave; pode ainda estar sem confirmação ou ter falhado",
   ),
   202: response(
     ref("Message"),
@@ -190,7 +190,7 @@ const examples: Record<string, object> = {
       data: "BASE64_DO_ARQUIVO",
       filename: "figurinha.webp",
     },
-    name: "Wapp",
+    name: "WappHub",
     author: "Minha integração",
   },
   location: {
@@ -243,6 +243,32 @@ const typedSendPaths = Object.fromEntries(
     ];
   }),
 );
+const receiptProperties = {
+  ack: {
+    type: "integer",
+    nullable: true,
+    enum: [-1, 0, 1, 2, 3, 4, null],
+    description:
+      "ACK observado: -1 falha, 0 pendente, 1 servidor, 2 dispositivo, 3 leitura, 4 reprodução. null significa ausência de confirmação.",
+  },
+  submittedAt: {
+    type: "string",
+    format: "date-time",
+    nullable: true,
+    description: "Quando a biblioteca retornou o ID; não confirma envio.",
+  },
+  sentAt: {
+    type: "string",
+    format: "date-time",
+    nullable: true,
+    description: "Primeira observação de ACK de servidor ou superior.",
+  },
+  deliveredAt: { type: "string", format: "date-time", nullable: true },
+  readAt: { type: "string", format: "date-time", nullable: true },
+  playedAt: { type: "string", format: "date-time", nullable: true },
+  lastAckAt: { type: "string", format: "date-time", nullable: true },
+  lastCheckedAt: { type: "string", format: "date-time", nullable: true },
+};
 const userInput = object(
   {
     username: { type: "string", pattern: "^[a-z0-9_.-]{3,64}$" },
@@ -267,7 +293,7 @@ const page = (name: string) =>
 export const openapi = {
   openapi: "3.0.3",
   info: {
-    title: "Wapp API",
+    title: "WappHub API",
     version: "1.1.0",
     description:
       "API de um workspace compartilhado para usuários e aplicativos autenticados. Dez tipos de envio, respostas, menções, sessões WhatsApp, contatos, grupos, canais e agendamento. Guia de integração: /integration-guide. Mídias em base64 até 16 MiB; requisições até 24 MiB. O uso de whatsapp-web.js não oferece garantia contra bloqueio.",
@@ -340,6 +366,55 @@ export const openapi = {
           items: object({ source: string, message: string }),
         },
       }),
+      PollOverview: object({
+        kind: { type: "string", enum: ["messages", "schedules"] },
+        recordId: { type: "string", format: "uuid" },
+        sessionId: string,
+        to: string,
+        poll: object(
+          {
+            name: string,
+            options: { type: "array", items: string },
+            allowMultipleAnswers: { type: "boolean" },
+          },
+          ["name", "options"],
+        ),
+        createdAt: { type: "string", format: "date-time" },
+        startedAt: { type: "string", format: "date-time", nullable: true },
+        sendAt: { type: "string", format: "date-time", nullable: true },
+        messageId: { type: "string", nullable: true },
+        deliveryStatus: string,
+      }),
+      PollResults: object({
+        recordId: { type: "string", format: "uuid" },
+        sessionId: string,
+        messageId: string,
+        name: string,
+        allowMultipleAnswers: { type: "boolean" },
+        totalVoters: { type: "integer" },
+        totalSelections: { type: "integer" },
+        options: {
+          type: "array",
+          items: object({
+            id: { type: "integer" },
+            name: string,
+            votes: { type: "integer" },
+            voters: { type: "array", items: string },
+          }),
+        },
+        votes: {
+          type: "array",
+          items: object({
+            voter: string,
+            selectedOptions: {
+              type: "array",
+              items: object({ id: { type: "integer" }, name: string }),
+            },
+            updatedAt: { type: "string", format: "date-time", nullable: true },
+          }),
+        },
+        fetchedAt: { type: "string", format: "date-time" },
+      }),
       SendMessage: sendInput,
       ScheduleInput: scheduleInput,
       MessageContent: previewInput,
@@ -352,12 +427,21 @@ export const openapi = {
         content: ref("MessageContent"),
         status: {
           type: "string",
-          enum: ["sending", "sent", "failed", "unknown"],
+          enum: [
+            "sending",
+            "submitted",
+            "sent",
+            "delivered",
+            "read",
+            "played",
+            "failed",
+            "unknown",
+          ],
         },
         messageId: { type: "string", nullable: true },
         error: { type: "string", nullable: true },
         createdAt: { type: "string", format: "date-time" },
-        sentAt: { type: "string", format: "date-time", nullable: true },
+        ...receiptProperties,
       }),
       Schedule: object({
         id: { type: "string", format: "uuid" },
@@ -372,7 +456,11 @@ export const openapi = {
           enum: [
             "pending",
             "sending",
+            "submitted",
             "sent",
+            "delivered",
+            "read",
+            "played",
             "failed",
             "unknown",
             "cancelled",
@@ -381,7 +469,7 @@ export const openapi = {
         messageId: { type: "string", nullable: true },
         error: { type: "string", nullable: true },
         createdAt: { type: "string", format: "date-time" },
-        sentAt: { type: "string", nullable: true, format: "date-time" },
+        ...receiptProperties,
       }),
     },
   },
@@ -565,7 +653,7 @@ export const openapi = {
       ),
       post: operation(
         "Mensagens",
-        "Enviar uma mensagem de qualquer tipo suportado",
+        "Enviar uma mensagem e acompanhar a confirmação pelo WhatsApp",
         ref("Message"),
         {
           operationId: "sendMessage",
@@ -584,6 +672,62 @@ export const openapi = {
         "Listar canais conhecidos pela sessão; a listagem não implica permissão de publicação",
         page("Group"),
         { parameters: [id, query("search"), ...paging] },
+      ),
+    },
+    "/messages/{id}/refresh-status": {
+      post: operation(
+        "Mensagens",
+        "Consultar confirmação atual no WhatsApp sem reenviar",
+        ref("Message"),
+        {
+          parameters: [id],
+          description:
+            "Requer sessão ready e ID WhatsApp conhecido. Preserva o status se a mensagem não estiver disponível. Também há acompanhamento automático por ACK e reconciliação periódica.",
+        },
+      ),
+    },
+    "/schedules/{id}/refresh-status": {
+      post: operation(
+        "Agendamentos",
+        "Consultar confirmação de um envio agendado sem reenviar",
+        ref("Schedule"),
+        { parameters: [id] },
+      ),
+    },
+    "/polls": {
+      get: operation(
+        "Mensagens",
+        "Listar enquetes enviadas e agendadas",
+        page("PollOverview"),
+        {
+          description:
+            "Reúne apenas registros do tipo poll. kind informa a origem para consultar respostas em /messages/{recordId}/poll-results ou /schedules/{recordId}/poll-results. startedAt é o horário em que o envio retornou ID, não uma confirmação de entrega; consulte deliveryStatus.",
+          parameters: [query("sessionId"), ...paging],
+        },
+      ),
+    },
+    "/messages/{id}/poll-results": {
+      get: operation(
+        "Mensagens",
+        "Consultar respostas de uma enquete enviada",
+        ref("PollResults"),
+        {
+          parameters: [id],
+          description:
+            "Use o UUID do registro WappHub, não o ID WhatsApp. Requer sessão ready e enquete disponível no histórico local. Retorna a seleção mais recente por participante, incluindo retiradas (selectedOptions vazio). totalVoters conta participantes com seleção ativa; totalSelections soma escolhas. Múltipla escolha pode ter mais seleções que participantes. Snapshot consultado no WhatsApp, sem armazenamento de votos no WappHub; ausência da mensagem gera erro, não zero votos.",
+        },
+      ),
+    },
+    "/schedules/{id}/poll-results": {
+      get: operation(
+        "Agendamentos",
+        "Consultar respostas de uma enquete enviada",
+        ref("PollResults"),
+        {
+          parameters: [id],
+          description:
+            "Use o UUID do registro WappHub, não o ID WhatsApp. Requer sessão ready e enquete disponível no histórico local. Retorna a seleção mais recente por participante, incluindo retiradas (selectedOptions vazio). totalVoters conta participantes com seleção ativa; totalSelections soma escolhas. Múltipla escolha pode ter mais seleções que participantes. Snapshot consultado no WhatsApp, sem armazenamento de votos no WappHub; ausência da mensagem gera erro, não zero votos.",
+        },
       ),
     },
     "/messages/{id}": {

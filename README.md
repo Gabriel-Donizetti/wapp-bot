@@ -1,4 +1,4 @@
-<p align="center"><strong>WAPP</strong> · Central de mensagens</p>
+<p align="center"><strong>WappHub</strong> · Central de mensagens</p>
 
 # Uma central para suas conexões WhatsApp
 
@@ -8,7 +8,7 @@ PostgreSQL, histórico de envios e execução com Docker Compose.
 
 [![CI](https://github.com/Gabriel-Donizetti/wapp-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Gabriel-Donizetti/wapp-bot/actions/workflows/ci.yml)
 
-![Painel Wapp com sessões, histórico e agendamentos](docs/images/dashboard.png)
+![Painel WappHub com sessões, histórico e agendamentos](docs/images/dashboard.png)
 
 ## O que você pode fazer
 
@@ -16,12 +16,13 @@ PostgreSQL, histórico de envios e execução com Docker Compose.
 - Enviar texto, imagem, áudio, voz, vídeo/GIF, documentos, figurinhas, localização,
   cartões de contato e enquetes para pessoas, grupos ou canais compatíveis.
 - Responder mensagens, mencionar pessoas/grupos e consultar os resultados.
+- Consultar respostas de enquetes, com contagem por opção e seleção por participante.
 - Agendar envios com data, hora e fuso; cancelar pendências pelo painel ou API.
 - Pesquisar grupos pelo nome e contatos salvos, sem duplicatas de identificador.
 - Criar usuários administradores, operadores e contas para integrações.
 - Integrar outros aplicativos por uma API versionada com documentação OpenAPI.
 
-O Wapp usa [whatsapp-web.js](https://github.com/wwebjs/whatsapp-web.js), um cliente
+O WappHub usa [whatsapp-web.js](https://github.com/wwebjs/whatsapp-web.js), um cliente
 não oficial. Não há garantia contra bloqueios de números. O projeto não é
 afiliado ao WhatsApp ou à Meta; use-o para comunicações esperadas pelos
 destinatários e respeite as regras da plataforma.
@@ -51,7 +52,7 @@ primeiro usuário quando o banco está vazio; não redefine senhas existentes.
 
 Adicione uma sessão em **Sessões** e escaneie o QR Code em **WhatsApp → Aparelhos
 conectados → Conectar aparelho**. Aguarde o estado **Conectada**. O cadastro no
-Wapp não cria uma conta de WhatsApp.
+WappHub não cria uma conta de WhatsApp.
 
 ```bash
 docker compose ps
@@ -91,6 +92,13 @@ para pará-lo. O script cria os bancos de desenvolvimento e teste caso estejam
 ausentes; preserva dados existentes. Instalações de PostgreSQL já administradas
 por um serviço do sistema também podem ser usadas diretamente via URLs, sem
 executar o script.
+
+Esse cluster de desenvolvimento usa `dynamic_shared_memory_type=mmap`, com
+arquivos dentro do diretório de dados, para não depender dos segmentos POSIX
+em `/dev/shm` de um usuário comum. A configuração vale para o script local;
+instalações gerenciadas e Docker mantêm sua configuração de PostgreSQL.
+Se o cluster já estava rodando antes desse ajuste, pare a API, execute
+`npm run db:local:stop` e `npm run db:local:start` e inicie a API novamente.
 
 Para servir a versão compilada localmente:
 
@@ -222,6 +230,14 @@ navegador; o banco usa `TIMESTAMPTZ`. `POST /schedules` ainda não tem
 idempotência: repetir cria outro registro. Mídias pendentes ficam no banco até
 a tentativa de envio/cancelamento; o histórico retorna apenas metadados.
 
+### Respostas de enquetes
+
+Use `GET /messages/:id/poll-results` para envios imediatos e
+`GET /schedules/:id/poll-results` para enquetes agendadas já enviadas.
+Informe o UUID do registro WappHub. A sessão precisa estar conectada (`ready`).
+O histórico do painel oferece o botão **Ver respostas da enquete**.
+Veja o formato e os limites da consulta no [guia de integração](docs/integration.md#consultar-respostas-da-enquete).
+
 ### Consultas e estados
 
 Listagens de contatos, grupos e históricos usam
@@ -234,14 +250,31 @@ o próprio número ou assistentes. Pessoas com nomes iguais e números diferente
 permanecem separadas. A consulta `directory` preserva resultados parciais e
 retorna `warnings` quando contatos ou grupos estiverem indisponíveis.
 
-| Estado      | Significado                                                 |
-| ----------- | ----------------------------------------------------------- |
-| `pending`   | Aguarda horário ou conexão da sessão.                       |
-| `sending`   | Envio em andamento.                                         |
-| `sent`      | O WhatsApp retornou um ID; não confirma entrega/leitura.    |
-| `failed`    | Falha anterior à tentativa de envio. Consulte `error`.      |
-| `unknown`   | Pode ter sido enviado; confira o WhatsApp antes de repetir. |
-| `cancelled` | Agendamento cancelado pelo usuário ou remoção da sessão.    |
+| Estado      | Significado                                            |
+| ----------- | ------------------------------------------------------ |
+| `pending`   | Aguarda horário ou conexão.                            |
+| `sending`   | Chamada de envio em andamento.                         |
+| `submitted` | Possui ID, mas ainda não há confirmação do servidor.   |
+| `sent`      | O servidor WhatsApp confirmou o envio.                 |
+| `delivered` | O WhatsApp informou entrega ao dispositivo.            |
+| `read`      | O WhatsApp informou leitura.                           |
+| `played`    | O WhatsApp informou reprodução.                        |
+| `failed`    | Falha anterior ao envio ou erro explícito do WhatsApp. |
+| `unknown`   | Resultado incerto; confira antes de repetir.           |
+| `cancelled` | Agendamento cancelado.                                 |
+
+O acompanhamento usa ACKs persistidos e consulta de recuperação a cada 30 segundos
+com a sessão conectada. O painel atualiza a lista e exibe as etapas com horários.
+As respostas incluem `ack`, `submittedAt`, `sentAt`, `deliveredAt`, `readAt`,
+`playedAt`, `lastAckAt` e `lastCheckedAt`. Os horários são os da observação pelo
+WappHub. Leia o [guia de integração](docs/integration.md#5-idempotência-e-acompanhamento)
+para a semântica completa. A ausência de confirmação de leitura não significa
+que a pessoa não leu.
+
+Use `POST /messages/:id/refresh-status` ou
+`POST /schedules/:id/refresh-status` para consultar o WhatsApp sem reenviar.
+Essas consultas exigem ID conhecido e sessão conectada. Mensagens antigas que
+só possuíam um ID ficam `submitted` até receberem confirmação real.
 
 Reinícios convertem envios interrompidos em `unknown`; eles não são reenviados
 automaticamente. IDs de sessões removidas ficam reservados para preservar o
