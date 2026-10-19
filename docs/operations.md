@@ -1,5 +1,9 @@
 # Migração e operação
 
+Para instalar do zero e configurar as variáveis de ambiente, comece pelo
+[guia Docker](docker.md). Este documento trata de migração, persistência e
+diagnóstico de uma instalação.
+
 ## Compatibilidade do envio de mídia
 
 A versão `whatsapp-web.js@1.34.7` recebe correções locais por
