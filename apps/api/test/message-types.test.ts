@@ -4,6 +4,7 @@ import request from "supertest";
 import whatsapp from "whatsapp-web.js";
 import { fixture } from "./helpers.js";
 import { Scheduler } from "../src/modules/schedules/scheduler.js";
+import { messageTypes } from "../src/shared/validation.js";
 const base = { sessionId: "comercial", to: "5511888888888" };
 const data = Buffer.from("Arquivo de teste").toString("base64");
 const media = (mimetype: string, filename: string) => ({
@@ -38,6 +39,86 @@ const cases = [
     },
   },
 ] as const;
+
+test("monitor acompanha todos os tipos imediatos e agendados sem reenviar", async (t) => {
+  assert.deepEqual(
+    cases.map((item) => item.type),
+    messageTypes,
+  );
+  const f = await fixture();
+  t.after(() => f.close());
+  const client = await f.add();
+  client.resultAck = 0;
+  const scheduler = new Scheduler(f.schedules, f.sessions);
+  t.after(() => scheduler.stop());
+  for (const content of cases) {
+    await t.test(content.type, async () => {
+      const sent = await f.call("post", `/messages/${content.type}`, {
+        ...base,
+        ...content,
+      });
+      assert.equal(sent.status, 201);
+      assert.equal(sent.body.status, "submitted");
+      const scheduled = await f.call("post", "/schedules", {
+        ...base,
+        ...content,
+        sendAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      assert.equal(scheduled.status, 201);
+      await f.pool.query(
+        "UPDATE schedules SET send_at=NOW()-INTERVAL '1 minute' WHERE id=$1",
+        [scheduled.body.id],
+      );
+      await scheduler.tick();
+      const schedule = await f.schedules.get(scheduled.body.id);
+      assert.equal(schedule.status, "submitted");
+      for (const [kind, record] of [
+        ["messages", sent.body],
+        ["schedules", schedule],
+      ] as const) {
+        const messageId = record.messageId;
+        assert.ok(messageId);
+        for (const [ack, status] of [
+          [1, "sent"],
+          [2, "delivered"],
+          [3, "read"],
+        ] as const) {
+          client.messageStates.get(messageId)!.ack = ack;
+          await f.monitor.tick();
+          const current = await f.call("get", `/${kind}/${record.id}`);
+          assert.equal(current.body.status, status, `${kind}/${content.type}`);
+          assert.equal(current.body.ack, ack);
+          assert.ok(current.body.lastCheckedAt);
+          assert.ok(current.body.sentAt);
+          if (ack >= 2) assert.ok(current.body.deliveredAt);
+          if (ack >= 3) assert.ok(current.body.readAt);
+        }
+        const audible = content.type === "audio" || content.type === "voice";
+        const pending = await f.receipts.pending(base.sessionId);
+        assert.equal(
+          pending.some((item) => item.messageId === messageId),
+          audible,
+        );
+        if (audible) {
+          client.messageStates.get(messageId)!.ack = 4;
+          await f.monitor.tick();
+          const current = await f.call("get", `/${kind}/${record.id}`);
+          assert.equal(current.body.status, "played");
+          assert.ok(current.body.playedAt);
+          assert.equal(
+            (await f.receipts.pending(base.sessionId)).some(
+              (item) => item.messageId === messageId,
+            ),
+            false,
+          );
+        }
+      }
+    });
+  }
+  await scheduler.tick();
+  await f.monitor.tick();
+  assert.equal(client.sent.length, cases.length * 2);
+});
 
 test("API: dez tipos de envio, histórico sem base64 e mesmas chaves entre rotas genérica e específica", async (t) => {
   const f = await fixture();

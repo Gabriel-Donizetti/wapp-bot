@@ -399,7 +399,12 @@ não confirmadas retornam `null`. Um ACK de etapa superior também comprova as
 anteriores; os horários observados podem coincidir.
 
 A API escuta `message_ack`, persiste os recibos por sessão e ID WhatsApp e
-consulta mensagens pendentes a cada 30 segundos enquanto a sessão está pronta.
+consulta mensagens pendentes a cada 5 minutos enquanto a sessão está pronta.
+Esse acompanhamento cobre texto, imagem, áudio, voz, vídeo, documento, figurinha,
+localização, contatos e enquete, tanto em envios imediatos quanto agendados.
+Áudio e voz continuam sendo consultados após a leitura para recuperar uma
+eventual confirmação de reprodução. O job consulta registros com ID WhatsApp;
+registros antigos sem ID continuam com resultado incerto e não são reenviados.
 Ao conectar, também dispara uma consulta de recuperação. Eventos atrasados não
 rebaixam uma entrega/leitura já confirmada. Não são expostas confirmações
 individuais de participantes de grupos nem estatísticas de audiência de canais.

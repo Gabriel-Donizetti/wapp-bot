@@ -26,6 +26,7 @@ export type ClientPort = Pick<
   | "info"
 > & {
   listGroups(): Promise<GroupSummary[]>;
+  isConnected(): Promise<boolean>;
 };
 export interface SendResult {
   sessionId: string;
@@ -67,6 +68,35 @@ export function clientFactory(authPath: string): ClientFactory {
       },
     });
     return Object.assign(client, {
+      async isConnected() {
+        const page = client.pupPage;
+        if (!client.pupBrowser?.isConnected() || !page || page.isClosed())
+          return false;
+        return page.evaluate(() => {
+          const wa = window as unknown as {
+            WWebJS?: { getMessageModel?: unknown };
+            onMessageAckEvent?: unknown;
+          };
+          return (
+            typeof wa.WWebJS?.getMessageModel === "function" &&
+            typeof wa.onMessageAckEvent === "function"
+          );
+        });
+      },
+      async destroy() {
+        const browser = client.pupBrowser;
+        const process = browser?.process();
+        // Uma conexão CDP perdida não encerra necessariamente o Chrome local.
+        // O destroy da biblioteca ignora esse processo quando isConnected=false.
+        if (browser && !browser.isConnected() && process?.exitCode === null) {
+          await new Promise<void>((resolve, reject) => {
+            process.once("exit", () => resolve());
+            process.once("error", reject);
+            process.kill("SIGTERM");
+          });
+        }
+        await Client.prototype.destroy.call(client);
+      },
       async listGroups() {
         if (!client.pupPage)
           throw new AppError(
@@ -120,11 +150,35 @@ export class Sessions {
   ) {}
 
   async list() {
+    await Promise.all(
+      [...this.runtimes].map(([id]) => this.checkConnection(id)),
+    );
     return (await this.repository.list()).map((row) => this.view(row));
   }
 
   async get(id: string) {
+    await this.checkConnection(id);
     return this.view(await this.repository.get(id));
+  }
+
+  private async checkConnection(id: string) {
+    const runtime = this.runtimes.get(id);
+    if (!runtime || runtime.status !== "ready") return;
+    let connected = false;
+    try {
+      connected = await withTimeout(runtime.client.isConnected(), 5_000);
+    } catch (error) {
+      this.onError(error, id);
+    }
+    if (
+      !connected &&
+      this.runtimes.get(id) === runtime &&
+      runtime.status === "ready"
+    ) {
+      runtime.status = "error";
+      runtime.error =
+        "A comunicação com o WhatsApp foi interrompida. Reconecte a sessão para enviar e consultar confirmações. Os status anteriores foram preservados.";
+    }
   }
 
   private view(row: SessionRecord) {
@@ -154,6 +208,7 @@ export class Sessions {
 
   private async ready(id: string): Promise<Runtime> {
     await this.repository.get(id);
+    await this.checkConnection(id);
     const runtime = this.runtimes.get(id);
     if (!runtime || !this.isReady(id)) {
       throw new AppError(
@@ -439,6 +494,7 @@ export class Sessions {
       message = await withTimeout(client.getMessageById(messageId), 15_000);
     } catch (error) {
       if (error instanceof AppError) throw error;
+      this.onError(error, sessionId);
       throw new AppError(
         502,
         "RECEIPT_UNAVAILABLE",

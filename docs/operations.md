@@ -133,13 +133,22 @@ de submissão e é exposto como `submittedAt`; o `sentAt` público vem do ACK.
 
 A migração 003 cria recibos sem ACK para IDs legados. Não inventa confirmação
 para mensagens antigas. O monitor consulta no máximo 50 pendências por sessão
-e ciclo, a cada 30 segundos, e também roda após a conexão. Voz e áudio podem
+e ciclo, a cada 5 minutos, e também roda após a conexão. Voz e áudio podem
 continuar sendo consultados depois de lidos para recuperar a reprodução.
 
 Consultas sem resultado preservam o status anterior. Não conclua falha apenas
 por falta de ACK ou por a mensagem não estar mais disponível no cache da sessão.
 Leitura depende das confirmações expostas pelo WhatsApp. Os horários são de
 observação pelo WappHub, podendo coincidir em uma recuperação tardia.
+
+A listagem de sessões e as operações verificam se a comunicação com o Chrome e
+as funções de confirmação continuam disponíveis. Se essa comunicação se perder,
+a sessão passa para `error`, com orientação para reconectar. Isso impede que uma
+sessão antiga continue aparecendo como pronta enquanto todas as consultas falham.
+Os recibos já registrados são preservados. Reconecte em **Sessões → Reconectar**;
+o perfil existente é reutilizado, sem reenviar as mensagens anteriores. Se o
+Chrome local continuar aberto após perder a conexão CDP, a reconexão encerra
+somente o processo que pertence àquela sessão antes de abrir outro.
 
 Timeouts continuam `unknown` até surgir resultado confiável; uma resposta tardia
 no mesmo processo atualiza o registro sem reenviar. A sessão permanece ocupada
