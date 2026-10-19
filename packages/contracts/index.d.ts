@@ -103,7 +103,12 @@ export type MessageContent =
   | { type: "contacts"; contacts: string[] }
   | {
       type: "poll";
-      poll: { name: string; options: string[]; allowMultipleAnswers?: boolean };
+      poll: {
+        name: string;
+        options: string[];
+        allowMultipleAnswers?: boolean;
+        durationHours?: number;
+      };
     };
 export type SendMessageRequest = MessageContent & {
   sessionId: string;
@@ -124,7 +129,12 @@ export type MessagePreview = {
     url?: string;
   };
   contacts?: string[];
-  poll?: { name: string; options: string[]; allowMultipleAnswers?: boolean };
+  poll?: {
+    name: string;
+    options: string[];
+    allowMultipleAnswers?: boolean;
+    durationHours?: number;
+  };
 };
 export type DeliveryStatus =
   | "pending"
@@ -179,12 +189,19 @@ export interface PollOverview {
   recordId: string;
   sessionId: string;
   to: string;
-  poll: { name: string; options: string[]; allowMultipleAnswers?: boolean };
+  poll: {
+    name: string;
+    options: string[];
+    allowMultipleAnswers?: boolean;
+    durationHours?: number;
+  };
   createdAt: string;
   startedAt: string | null;
   sendAt: string | null;
   messageId: string | null;
   deliveryStatus: DeliveryStatus;
+  expiresAt: string | null;
+  expired: boolean;
 }
 export interface PollResults {
   recordId: string;
@@ -201,6 +218,11 @@ export interface PollResults {
     updatedAt: string | null;
   }>;
   fetchedAt: string;
+  expiresAt: string;
+  expired: boolean;
+  source: "whatsapp" | "stored";
+  syncedAt: string | null;
+  warning: string | null;
 }
 export interface Page<T> {
   data: T[];

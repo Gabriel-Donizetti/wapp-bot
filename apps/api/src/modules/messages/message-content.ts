@@ -61,7 +61,11 @@ export function requestHash(input: NormalizedMessageInput) {
     input.type === "text" &&
     (!input.options || !Object.keys(input.options).length)
       ? [input.sessionId, input.to, input.text]
-      : canonical(input);
+      : canonical(
+          input.type === "poll" && input.poll.durationHours === 24
+            ? { ...input, poll: { ...input.poll, durationHours: undefined } }
+            : input,
+        );
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 export function normalize(input: MessageInput) {

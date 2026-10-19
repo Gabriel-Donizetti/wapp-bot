@@ -216,6 +216,7 @@ const examples: Record<string, object> = {
       name: "Qual horário?",
       options: ["Manhã", "Tarde"],
       allowMultipleAnswers: false,
+      durationHours: 24,
     },
   },
 };
@@ -384,6 +385,12 @@ export const openapi = {
             name: string,
             options: { type: "array", items: string },
             allowMultipleAnswers: { type: "boolean" },
+            durationHours: {
+              type: "number",
+              minimum: 1,
+              maximum: 720,
+              default: 24,
+            },
           },
           ["name", "options"],
         ),
@@ -392,6 +399,8 @@ export const openapi = {
         sendAt: { type: "string", format: "date-time", nullable: true },
         messageId: { type: "string", nullable: true },
         deliveryStatus: string,
+        expiresAt: { type: "string", format: "date-time", nullable: true },
+        expired: { type: "boolean" },
       }),
       PollResults: object({
         recordId: { type: "string", format: "uuid" },
@@ -422,6 +431,11 @@ export const openapi = {
           }),
         },
         fetchedAt: { type: "string", format: "date-time" },
+        expiresAt: { type: "string", format: "date-time" },
+        expired: { type: "boolean" },
+        source: { type: "string", enum: ["whatsapp", "stored"] },
+        syncedAt: { type: "string", format: "date-time", nullable: true },
+        warning: { type: "string", nullable: true },
       }),
       SendMessage: sendInput,
       ScheduleInput: scheduleInput,
@@ -737,8 +751,20 @@ export const openapi = {
         page("PollOverview"),
         {
           description:
-            "Reúne apenas registros do tipo poll. kind informa a origem para consultar respostas em /messages/{recordId}/poll-results ou /schedules/{recordId}/poll-results. startedAt é o horário em que o envio retornou ID, não uma confirmação de entrega; consulte deliveryStatus.",
-          parameters: [query("sessionId"), ...paging],
+            "Por padrão lista enquetes ativas. state=expired ou all permite consultar as demais sem excluir o histórico. Prazo padrão: 24h; poll.durationHours aceita de 1 a 720h. A contagem começa em startedAt (ID retornado); registros incertos sem ID usam createdAt. Agendamentos pendentes não iniciam a contagem. expiresAt e expired indicam o prazo no WappHub; não encerram votação no WhatsApp. kind informa a origem para consultar as respostas.",
+          parameters: [
+            query("sessionId"),
+            {
+              name: "state",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: ["active", "expired", "all"],
+                default: "active",
+              },
+            },
+            ...paging,
+          ],
         },
       ),
     },
@@ -750,7 +776,7 @@ export const openapi = {
         {
           parameters: [id],
           description:
-            "Use o UUID do registro WappHub, não o ID WhatsApp. Requer sessão ready e enquete disponível no histórico local. Retorna a seleção mais recente por participante, incluindo retiradas (selectedOptions vazio). totalVoters conta participantes com seleção ativa; totalSelections soma escolhas. Múltipla escolha pode ter mais seleções que participantes. Snapshot consultado no WhatsApp, sem armazenamento de votos no WappHub; ausência da mensagem gera erro, não zero votos.",
+            "Use o UUID do registro WappHub e um messageId WhatsApp confirmado. Durante o prazo, coleta respostas do WhatsApp e persiste versões por participante. Após expirar, retorna somente dados salvos, sem consultar o WhatsApp; sem coleta confirmada retorna HTTP 409 POLL_RESULTS_UNAVAILABLE. O job também exclui expiradas por query. A contagem considera a última seleção coletada até expiresAt, incluindo retiradas. totalVoters conta participantes com seleção ativa e totalSelections soma escolhas. source=stored e warning identificam dados salvos quando a atualização falha ou a sessão está offline. Sem coleta anterior, indisponibilidade gera erro, não zero votos. O prazo vale no WappHub e não bloqueia novos votos no chat.",
         },
       ),
     },
@@ -762,7 +788,7 @@ export const openapi = {
         {
           parameters: [id],
           description:
-            "Use o UUID do registro WappHub, não o ID WhatsApp. Requer sessão ready e enquete disponível no histórico local. Retorna a seleção mais recente por participante, incluindo retiradas (selectedOptions vazio). totalVoters conta participantes com seleção ativa; totalSelections soma escolhas. Múltipla escolha pode ter mais seleções que participantes. Snapshot consultado no WhatsApp, sem armazenamento de votos no WappHub; ausência da mensagem gera erro, não zero votos.",
+            "Use o UUID do registro WappHub e um messageId WhatsApp confirmado. Durante o prazo, coleta respostas do WhatsApp e persiste versões por participante. Após expirar, retorna somente dados salvos, sem consultar o WhatsApp; sem coleta confirmada retorna HTTP 409 POLL_RESULTS_UNAVAILABLE. O job também exclui expiradas por query. A contagem considera a última seleção coletada até expiresAt, incluindo retiradas. totalVoters conta participantes com seleção ativa e totalSelections soma escolhas. source=stored e warning identificam dados salvos quando a atualização falha ou a sessão está offline. Sem coleta anterior, indisponibilidade gera erro, não zero votos. O prazo vale no WappHub e não bloqueia novos votos no chat.",
         },
       ),
     },

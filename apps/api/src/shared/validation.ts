@@ -221,6 +221,7 @@ function sendSchema(scheduled: boolean) {
                   "As opções precisam ser distintas.",
                 ),
               allowMultipleAnswers: z.boolean().default(false),
+              durationHours: z.number().min(1).max(720).default(24),
             })
             .strict(),
         })

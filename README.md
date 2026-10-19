@@ -16,7 +16,7 @@ PostgreSQL, histórico de envios e execução com Docker Compose.
 - Enviar texto, imagem, áudio, voz, vídeo/GIF, documentos, figurinhas, localização,
   cartões de contato e enquetes para pessoas, grupos ou canais compatíveis.
 - Responder mensagens, mencionar pessoas/grupos e consultar os resultados.
-- Consultar respostas de enquetes, com contagem por opção e seleção por participante.
+- Consultar respostas de enquetes, com coleta automática, votos salvos e prazo de acompanhamento (padrão de 1 dia).
 - Agendar envios com data, hora e fuso; cancelar pendências pelo painel ou API.
 - Pesquisar grupos pelo nome e contatos salvos, sem duplicatas de identificador.
 - Criar usuários administradores, operadores e contas para integrações.
@@ -241,8 +241,13 @@ a tentativa de envio/cancelamento; o histórico retorna apenas metadados.
 
 Use `GET /messages/:id/poll-results` para envios imediatos e
 `GET /schedules/:id/poll-results` para enquetes agendadas já enviadas.
-Informe o UUID do registro WappHub. A sessão precisa estar conectada (`ready`).
-O histórico do painel oferece o botão **Ver respostas da enquete**.
+Informe o UUID do registro WappHub. Uma coleta nova exige sessão conectada
+(`ready`); respostas já coletadas ficam salvas e podem ser consultadas offline.
+Um job coleta votos a cada minuto, sem precisar abrir a janela de respostas.
+Configure `poll.durationHours` (padrão 24h). As expiradas saem de **Enquetes** e
+continuam no histórico, que oferece **Ver respostas da enquete**. A contagem usa
+as seleções coletadas até o prazo. Após a expiração, os jobs deixam de coletar
+votos e as consultas retornam somente dados salvos; a votação no chat não é bloqueada.
 Veja o formato e os limites da consulta no [guia de integração](docs/integration.md#consultar-respostas-da-enquete).
 
 ### Consultas e estados
@@ -251,6 +256,10 @@ Listagens de contatos, grupos e históricos usam
 `{data, total, limit, offset}`; `limit` vai de 1 a 500. Contatos e grupos aceitam
 `search`, sem distinção de acentos ou maiúsculas. Históricos aceitam `sessionId`
 e `status`; agendamentos também aceitam `order=asc|desc`.
+
+No painel, **Histórico** e **Agendamentos** permitem combinar os filtros de
+sessão e status. **Todas as sessões** reúne os registros; trocar um filtro
+retorna à primeira página.
 
 Os contatos são apenas os salvos na agenda, sem repetir o mesmo ID e sem incluir
 o próprio número ou assistentes. Pessoas com nomes iguais e números diferentes

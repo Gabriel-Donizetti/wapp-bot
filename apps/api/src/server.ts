@@ -15,6 +15,8 @@ import { MessageRepository } from "./modules/messages/message-repository.js";
 import { MessageService } from "./modules/messages/message-service.js";
 import { DeliveryRepository } from "./modules/messages/delivery-repository.js";
 import { DeliveryMonitor } from "./modules/messages/delivery-monitor.js";
+import { PollMonitor } from "./modules/messages/poll-monitor.js";
+import { PollRepository } from "./modules/messages/poll-repository.js";
 import { prepareShutdown } from "./http/server-lifecycle.js";
 import { buildApp } from "./app.js";
 
@@ -32,6 +34,7 @@ const schedules = new ScheduleRepository(pool);
 const messages = new MessageRepository(pool);
 const receipts = new DeliveryRepository(pool);
 let deliveryMonitor: DeliveryMonitor;
+let pollMonitor: PollMonitor;
 const authPath = join(config.DATA_DIR, "auth");
 const sessions = new Sessions(
   sessionRepository,
@@ -43,6 +46,10 @@ const sessions = new Sessions(
     receipt: (receipt) => receipts.observe(receipt),
     ready: async () => {
       await deliveryMonitor?.tick();
+      await pollMonitor?.tick();
+    },
+    pollChanged: async () => {
+      await pollMonitor?.tick();
     },
   },
 );
@@ -53,6 +60,12 @@ deliveryMonitor = new DeliveryMonitor(receipts, sessions, (error, sessionId) =>
   ),
 );
 const scheduler = new Scheduler(schedules, sessions);
+pollMonitor = new PollMonitor(
+  new PollRepository(pool),
+  sessions,
+  (error, sessionId) =>
+    log.error({ err: error, sessionId }, "Falha ao coletar votos de enquete"),
+);
 const app = buildApp({
   pool,
   auth,
@@ -74,6 +87,7 @@ const shutdown = async () => {
   const drain = drainHttp?.() ?? Promise.resolve();
   await scheduler.stop();
   await deliveryMonitor.stop();
+  await pollMonitor.stop();
   await drain;
   await sessions.close();
   if (lease) {
@@ -119,6 +133,7 @@ try {
     log.error({ err: error }, "Falha no agendador"),
   );
   deliveryMonitor.start();
+  pollMonitor.start();
   server = app.listen(config.PORT, config.HOST);
   drainHttp = prepareShutdown(server);
   await new Promise<void>((resolve, reject) => {

@@ -24,7 +24,10 @@ export function PollsPage({
         <div>
           <p className="eyebrow">VOTAÇÕES E RESPOSTAS</p>
           <h1>Enquetes</h1>
-          <p>Acompanhe suas enquetes e as respostas por participante.</p>
+          <p>
+            Enquetes ativas e respostas por participante. Sem prazo informado, a
+            duração é de 1 dia.
+          </p>
         </div>
         <button className="primary" onClick={onCompose}>
           <Send size={16} /> Nova enquete
@@ -82,6 +85,11 @@ export function PollsPage({
                         ? `Agendada para ${dateTime(item.sendAt)}`
                         : `Criada em ${dateTime(item.createdAt)}`}
                   </small>
+                  <small>
+                    {item.expiresAt
+                      ? `Sai da lista em ${dateTime(item.expiresAt)}`
+                      : "O prazo começa após o envio."}
+                  </small>
                   <ul>
                     {item.poll.options.map((option) => (
                       <li key={option}>{option}</li>
@@ -122,11 +130,17 @@ export function PollsPage({
             </div>
           </>
         ) : resource.data && !resource.error ? (
-          <Empty title="Nenhuma enquete por aqui">
-            Crie uma enquete em Nova mensagem para acompanhar suas respostas.
+          <Empty title="Nenhuma enquete ativa">
+            Crie uma enquete em Nova mensagem. As expiradas continuam no
+            Histórico ou em Agendamentos.
           </Empty>
         ) : null}
       </section>
+      <p className="footnote">
+        O prazo vale para o acompanhamento no WappHub. A biblioteca não oferece
+        encerramento nativo da votação no chat; votos posteriores ao prazo não
+        entram na contagem deste sistema.
+      </p>
     </>
   );
 }

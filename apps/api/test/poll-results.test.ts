@@ -113,16 +113,17 @@ test("enquetes: sessão correta e mensagem disponível são obrigatórias; indis
   assert.equal((await f.call("get", path)).body.totalVoters, 0);
   client.quoteMissing = true;
   const missing = await f.call("get", path);
-  assert.equal(missing.status, 422);
-  assert.equal(missing.body.error, "POLL_UNAVAILABLE");
+  assert.equal(missing.status, 200);
+  assert.equal(missing.body.source, "stored");
+  assert.match(missing.body.warning, /votos já coletados/);
   client.quoteMissing = false;
   client.pollVotesError = true;
-  assert.equal((await f.call("get", path)).status, 502);
+  assert.equal((await f.call("get", path)).body.source, "stored");
   client.pollVotesError = false;
   client.pollVotes = [vote("x@c.us", ["Opção desconhecida"], Date.now())];
-  assert.equal((await f.call("get", path)).status, 502);
+  assert.ok((await f.call("get", path)).body.warning);
   await f.sessions.disconnect("comercial");
-  assert.equal((await f.call("get", path)).body.error, "SESSION_NOT_READY");
+  assert.equal((await f.call("get", path)).body.source, "stored");
   const text = await f.messageRepository.reserve(
     { sessionId: "outra", to: poll.to, text: "Texto" },
     f.user.id,
