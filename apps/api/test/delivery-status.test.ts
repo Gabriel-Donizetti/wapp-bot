@@ -9,6 +9,61 @@ const input = {
   text: "Mensagem com acompanhamento",
 };
 
+test("sessão com conexão perdida deixa de ser ready e preserva ACKs sem reenviar", async (t) => {
+  for (const throws of [false, true]) {
+    const f = await fixture();
+    t.after(() => f.close());
+    const client = await f.add();
+    client.resultAck = 2;
+    const sent = await f.call("post", "/messages/text", input);
+    assert.equal(sent.body.status, "delivered");
+    client.connected = false;
+    client.connectionError = throws;
+    const checked = await f.call(
+      "post",
+      `/messages/${sent.body.id}/refresh-status`,
+    );
+    assert.equal(checked.status, 409);
+    assert.equal(checked.body.error, "SESSION_NOT_READY");
+    assert.equal(
+      (await f.messageRepository.get(sent.body.id)).status,
+      "delivered",
+    );
+    assert.equal(
+      (await f.call("get", "/sessions/comercial")).body.status,
+      "error",
+    );
+    assert.match(
+      (await f.call("get", "/sessions")).body.sessions[0].error,
+      /Reconecte/,
+    );
+    const blocked = await f.call("post", "/messages/text", input);
+    assert.equal(blocked.status, 409);
+    assert.equal(client.sent.length, 1);
+    const reconnect = await f.call("post", "/sessions/comercial/connect");
+    assert.equal(reconnect.status, 200);
+    assert.equal(client.destroyed, true);
+    const recovered = f.clients.get("comercial")!;
+    recovered.emit("ready");
+    assert.equal(
+      (await f.call("get", "/sessions/comercial")).body.status,
+      "ready",
+    );
+  }
+});
+
+test("listagem detecta conexão perdida antes de outra consulta ou envio", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const client = await f.add();
+  client.connected = false;
+  assert.equal(
+    (await f.call("get", "/sessions")).body.sessions[0].status,
+    "error",
+  );
+  assert.equal(f.sessions.isReady("comercial"), false);
+});
+
 test("ID sem ACK fica submitted; confirmações progridem e não regridem com eventos atrasados", async (t) => {
   const f = await fixture();
   t.after(() => f.close());

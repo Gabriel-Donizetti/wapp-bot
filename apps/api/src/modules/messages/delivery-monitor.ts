@@ -10,7 +10,7 @@ export class DeliveryMonitor {
     private sessions: Pick<Sessions, "list" | "isReady" | "refreshReceipt">,
     private onError: (error: unknown, sessionId: string) => void = () => {},
   ) {}
-  start(intervalMs = 30_000) {
+  start(intervalMs = 5 * 60_000) {
     this.timer = setInterval(() => {
       void this.tick();
     }, intervalMs);

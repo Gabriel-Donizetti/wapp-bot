@@ -23,6 +23,12 @@ import { buildApp } from "../src/app.js";
 export const testPassword = "Test-only-password-12345";
 export const testSecret = "test-only-jwt-secret-with-over-32-characters";
 export class FakeClient extends EventEmitter {
+  connected = true;
+  connectionError = false;
+  async isConnected() {
+    if (this.connectionError) throw new Error("Conexão CDP encerrada");
+    return this.connected;
+  }
   info = { wid: { user: "5511999999999", server: "c.us" } };
   sent: Array<{ to: string; text: string }> = [];
   deliveries: Array<{

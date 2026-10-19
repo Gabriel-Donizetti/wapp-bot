@@ -263,7 +263,7 @@ retorna `warnings` quando contatos ou grupos estiverem indisponíveis.
 | `unknown`   | Resultado incerto; confira antes de repetir.           |
 | `cancelled` | Agendamento cancelado.                                 |
 
-O acompanhamento usa ACKs persistidos e consulta de recuperação a cada 30 segundos
+O acompanhamento usa ACKs persistidos e consulta de recuperação a cada 5 minutos
 com a sessão conectada. O painel atualiza a lista e exibe as etapas com horários.
 As respostas incluem `ack`, `submittedAt`, `sentAt`, `deliveredAt`, `readAt`,
 `playedAt`, `lastAckAt` e `lastCheckedAt`. Os horários são os da observação pelo
