@@ -306,14 +306,18 @@ export function ComposePage({
                 title={
                   !selectedSession
                     ? "Selecione uma sessão"
-                    : selectedSession.status === "qr"
-                      ? "Leia o QR Code"
-                      : "Sessão desconectada"
+                    : selectedSession.status === "pairing"
+                      ? "Confirme o código no celular"
+                      : selectedSession.status === "qr"
+                        ? "Leia o QR Code"
+                        : "Sessão desconectada"
                 }
               >
-                {selectedSession?.status === "qr"
-                  ? "Abra Sessões e leia o QR Code com seu WhatsApp."
-                  : "Abra Sessões para conectar ou reconectar o número."}
+                {selectedSession?.status === "pairing"
+                  ? "Abra Sessões e informe o código no WhatsApp do celular."
+                  : selectedSession?.status === "qr"
+                    ? "Abra Sessões e leia o QR Code com seu WhatsApp."
+                    : "Abra Sessões para conectar ou reconectar o número."}
                 <button className="secondary" onClick={onManageSessions}>
                   Gerenciar sessões
                 </button>

@@ -23,6 +23,16 @@ import { buildApp } from "../src/app.js";
 export const testPassword = "Test-only-password-12345";
 export const testSecret = "test-only-jwt-secret-with-over-32-characters";
 export class FakeClient extends EventEmitter {
+  pairingRequests: string[] = [];
+  pairingError = false;
+  pairingGate?: Promise<void>;
+  async requestPairingCode(phone: string) {
+    this.pairingRequests.push(phone);
+    await this.pairingGate;
+    if (this.pairingError) throw new Error("Falha ao gerar código");
+    this.emit("code", "ABCD1234");
+    return "ABCD1234";
+  }
   connected = true;
   connectionError = false;
   async isConnected() {

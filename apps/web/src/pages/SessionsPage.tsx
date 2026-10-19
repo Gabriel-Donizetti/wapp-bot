@@ -1,9 +1,58 @@
 import { useState, type FormEvent } from "react";
 import { Plus, RefreshCw, Smartphone, Unplug, Trash2 } from "lucide-react";
-import type { Session } from "@wapp/contracts";
+import type { PairingCode, Session } from "@wapp/contracts";
 import { api } from "../lib/api";
 import { useResource } from "../lib/use-resource";
 import { Badge, Empty, ErrorBox, Modal, useAction } from "../components/ui";
+
+function ConnectionFields({
+  initialMethod = "qr",
+}: {
+  initialMethod?: "qr" | "code";
+}) {
+  const [method, setMethod] = useState(initialMethod);
+  return (
+    <>
+      <label>
+        Forma de conexão
+        <select
+          name="connectionMethod"
+          value={method}
+          onChange={(event) => setMethod(event.target.value as "qr" | "code")}
+        >
+          <option value="qr">QR Code</option>
+          <option value="code">Código com número de telefone</option>
+        </select>
+      </label>
+      {method === "code" ? (
+        <label>
+          Número do WhatsApp com DDI
+          <input
+            name="pairingPhoneNumber"
+            type="tel"
+            inputMode="tel"
+            placeholder="5511999999999"
+            pattern="\+?[1-9][0-9]{7,14}"
+            maxLength={16}
+            required
+          />
+          <small>
+            Digite o número que será conectado. Você confirmará o código no
+            WhatsApp desse celular.
+          </small>
+        </label>
+      ) : null}
+    </>
+  );
+}
+
+function connectionData(form: HTMLFormElement) {
+  const data = new FormData(form);
+  return data.get("connectionMethod") === "code"
+    ? { pairingPhoneNumber: String(data.get("pairingPhoneNumber")) }
+    : {};
+}
+
 function SessionCard({
   session,
   onChange,
@@ -11,8 +60,15 @@ function SessionCard({
   session: Session;
   onChange: () => void;
 }) {
+  const [connecting, setConnecting] = useState<"qr" | "code" | null>(null);
   const qr = useResource<{ qr: string | null }>(
     session.status === "qr" ? `/sessions/${session.id}/qr` : null,
+    3000,
+  );
+  const pairing = useResource<PairingCode>(
+    session.status === "pairing"
+      ? `/sessions/${session.id}/pairing-code`
+      : null,
     3000,
   );
   const action = useAction();
@@ -45,9 +101,49 @@ function SessionCard({
             <span>Gerando QR Code…</span>
           )}
           <small>WhatsApp → Aparelhos conectados → Conectar aparelho</small>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => setConnecting("code")}
+          >
+            Conectar por código
+          </button>
         </div>
       ) : null}
-      <ErrorBox message={session.error || qr.error} />
+      {session.status === "pairing" ? (
+        <div className="pairing-box" aria-live="polite">
+          <p>
+            Conectar{" "}
+            {pairing.data?.phoneNumber
+              ? `+${pairing.data.phoneNumber}`
+              : "por código"}
+          </p>
+          {pairing.data?.code &&
+          pairing.data.expiresAt &&
+          Date.parse(pairing.data.expiresAt) > Date.now() ? (
+            <output aria-label="Código de vinculação">
+              {pairing.data.code.slice(0, 4)}-{pairing.data.code.slice(4)}
+            </output>
+          ) : (
+            <span>Gerando código de vinculação…</span>
+          )}
+          <small>
+            No celular: WhatsApp → Aparelhos conectados → Conectar aparelho →
+            Conectar com número de telefone. Digite o código exibido aqui.
+          </small>
+          <small>
+            O código é renovado automaticamente. Use sempre o mais recente.
+          </small>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => setConnecting("qr")}
+          >
+            Usar QR Code
+          </button>
+        </div>
+      ) : null}
+      <ErrorBox message={session.error || qr.error || pairing.error} />
       {action.feedback}
       <div className="session-actions">
         {session.status === "authenticated" ? (
@@ -73,7 +169,7 @@ function SessionCard({
           <button
             className="secondary"
             disabled={action.busy}
-            onClick={() => void perform(`/sessions/${session.id}/connect`)}
+            onClick={() => setConnecting("qr")}
           >
             <RefreshCw size={14} />
             Reconectar
@@ -105,6 +201,37 @@ function SessionCard({
           <Trash2 size={16} />
         </button>
       </div>
+      {connecting ? (
+        <Modal
+          title={`Conectar ${session.name}`}
+          onClose={() => setConnecting(null)}
+        >
+          <form
+            className="stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const body = connectionData(event.currentTarget);
+              void action.run(async () => {
+                await api(`/sessions/${session.id}/disconnect`, {
+                  method: "POST",
+                });
+                await api(`/sessions/${session.id}/connect`, {
+                  method: "POST",
+                  body,
+                });
+                setConnecting(null);
+                onChange();
+              });
+            }}
+          >
+            <ConnectionFields initialMethod={connecting} />
+            {action.feedback}
+            <button className="primary full" disabled={action.busy}>
+              {action.busy ? "Conectando…" : "Conectar sessão"}
+            </button>
+          </form>
+        </Modal>
+      ) : null}
     </article>
   );
 }
@@ -121,9 +248,15 @@ export function SessionsPage({
   const action = useAction();
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const body = {
+      id: data.get("id"),
+      name: data.get("name"),
+      ...connectionData(form),
+    };
     void action.run(async () => {
-      await api("/sessions", { method: "POST", body: data });
+      await api("/sessions", { method: "POST", body });
       setCreating(false);
       onChange();
     });
@@ -155,7 +288,7 @@ export function SessionsPage({
       ) : (
         <section className="card">
           <Empty title="Sua primeira conexão começa aqui">
-            Adicione uma sessão e escaneie o QR Code com o WhatsApp.
+            Adicione uma sessão e conecte por QR Code ou código no WhatsApp.
           </Empty>
         </section>
       )}
@@ -187,6 +320,7 @@ export function SessionsPage({
                 API.
               </small>
             </label>
+            <ConnectionFields />
             {action.feedback}
             <button className="primary full" disabled={action.busy}>
               {action.busy ? "Criando…" : "Criar sessão"}

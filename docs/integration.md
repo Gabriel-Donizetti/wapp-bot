@@ -4,6 +4,9 @@ O WappHub fornece uma API REST para conectar sessões WhatsApp e enviar mensagen
 imediatas ou agendadas. A base local é `http://127.0.0.1:3000/api/v1`.
 O painel de desenvolvimento também encaminha a API em `http://127.0.0.1:5173`.
 
+Para subir o serviço com PostgreSQL e configurar ambiente e primeiro acesso,
+consulte `docs/docker.md` no repositório do projeto.
+
 - Swagger executável: `/docs/`.
 - Contrato importável em Postman/Insomnia: `/openapi.json`.
 - Este guia no navegador: `/integration-guide`.
@@ -52,14 +55,74 @@ O ID aceita letras, números, `_` e `-`, até 64 caracteres. Consulte
 Consulte `GET /sessions/comercial` até `status: "ready"`. O cadastro registra
 uma sessão de uma conta existente; não cria um novo número WhatsApp.
 
-| Método | Rota                        | Uso                                               |
-| ------ | --------------------------- | ------------------------------------------------- |
-| GET    | `/sessions`                 | Listar sessões e estados.                         |
-| GET    | `/sessions/{id}`            | Consultar uma sessão.                             |
-| GET    | `/sessions/{id}/qr`         | Consultar QR e estado.                            |
-| POST   | `/sessions/{id}/connect`    | Iniciar ou reconectar.                            |
-| POST   | `/sessions/{id}/disconnect` | Parar e preservar autenticação.                   |
-| DELETE | `/sessions/{id}`            | Remover perfil e cancelar agendamentos pendentes. |
+### Conectar por código, sem escanear QR
+
+Informe `pairingPhoneNumber` no cadastro para usar um código de vinculação:
+
+```http
+POST /api/v1/sessions
+Authorization: Bearer SEU_ACCESS_TOKEN
+Content-Type: application/json
+
+{"id":"comercial-codigo","name":"Comercial","pairingPhoneNumber":"5511999999999"}
+```
+
+O número deve incluir DDI, sem espaços ou pontuação; um `+` inicial é aceito.
+Consulte `GET /sessions/comercial-codigo/pairing-code` a cada três segundos.
+Durante a geração, `code` e `expiresAt` podem ser `null`. Quando disponível:
+
+```json
+{
+  "sessionId": "comercial-codigo",
+  "status": "pairing",
+  "phoneNumber": "5511999999999",
+  "code": "ABCD1234",
+  "expiresAt": "2026-10-19T15:03:00.000Z"
+}
+```
+
+No WhatsApp do celular, abra **Aparelhos conectados → Conectar aparelho →
+Conectar com número de telefone** e digite o código. Use sempre o código mais
+recente: ele é renovado automaticamente. `expiresAt` limita sua exibição no
+WappHub a três minutos; a validade efetiva é verificada pelo WhatsApp.
+
+Após a confirmação, a sessão passa por `authenticated` até `ready`, e o código
+deixa de ser exposto. Códigos e o número solicitado para vinculação ficam apenas
+em memória e não aparecem na listagem de sessões. O telefone autenticado aparece
+normalmente no campo `phone` quando a sessão está pronta.
+
+Para uma sessão já cadastrada, envie o mesmo campo em
+`POST /sessions/{id}/connect`. Para trocar o método ou o número de uma sessão
+iniciada, primeiro chame `POST /sessions/{id}/disconnect`. Depois, conecte com
+`pairingPhoneNumber` para usar código ou sem corpo para usar QR. Um perfil já
+autenticado pode ser restaurado diretamente, sem uma nova vinculação.
+
+Exemplo de conexão por código de uma sessão cadastrada e desconectada:
+
+```http
+POST /api/v1/sessions/comercial-codigo/connect
+Authorization: Bearer SEU_ACCESS_TOKEN
+Content-Type: application/json
+
+{"pairingPhoneNumber":"5511999999999"}
+```
+
+Se a geração falhar, consulte `GET /sessions/{id}`: a sessão terá `status: "error"`
+e uma mensagem no campo `error`. Confira o número e reconecte. Uma sessão ainda
+iniciada com outro método ou número retorna `409 SESSION_ALREADY_STARTED`;
+desconecte antes de trocar. `409 SESSION_BUSY` indica inicialização ou envio em
+andamento. Após reiniciar a API, uma vinculação pendente volta ao QR por padrão;
+selecione novamente a opção por código quando necessário.
+
+| Método | Rota                          | Uso                                               |
+| ------ | ----------------------------- | ------------------------------------------------- |
+| GET    | `/sessions`                   | Listar sessões e estados.                         |
+| GET    | `/sessions/{id}`              | Consultar uma sessão.                             |
+| GET    | `/sessions/{id}/qr`           | Consultar QR e estado.                            |
+| GET    | `/sessions/{id}/pairing-code` | Consultar código temporário e estado.             |
+| POST   | `/sessions/{id}/connect`      | Iniciar ou reconectar.                            |
+| POST   | `/sessions/{id}/disconnect`   | Parar e preservar autenticação.                   |
+| DELETE | `/sessions/{id}`              | Remover perfil e cancelar agendamentos pendentes. |
 
 IDs removidos ficam reservados para preservar o histórico. Não abra a mesma
 pasta de perfil com duas instâncias do Chromium/Chrome.
@@ -519,7 +582,7 @@ Em `urllib.error.HTTPError`, leia o corpo JSON para obter `error`, `message` e
 ## 8. Erros e diagnóstico
 
 Formato: `{error, message, requestId, details?}`. Todas as respostas incluem
-`X-Request-ID`. Não exponha senhas, tokens, QR ou conteúdo das mensagens em logs
+`X-Request-ID`. Não exponha senhas, tokens, QR, códigos de vinculação ou conteúdo das mensagens em logs
 do aplicativo integrador.
 
 | HTTP | Exemplos                                                                           | Ação                                                          |

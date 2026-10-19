@@ -17,6 +17,13 @@ const object = (
   required = Object.keys(properties),
 ) => ({ type: "object", properties, required, additionalProperties: false });
 const string = { type: "string" };
+const pairingPhoneNumber = {
+  type: "string",
+  pattern: "^\\+?[1-9]\\d{7,14}$",
+  description:
+    "Opcional. Número com DDI para vincular por código em vez de QR. A confirmação é feita no WhatsApp do celular.",
+  example: "5511999999999",
+};
 const id = { name: "id", in: "path", required: true, schema: string };
 const query = (name: string, type = "string") => ({
   name,
@@ -340,6 +347,7 @@ export const openapi = {
           enum: [
             "starting",
             "qr",
+            "pairing",
             "authenticated",
             "ready",
             "disconnected",
@@ -565,10 +573,14 @@ export const openapi = {
         ref("Session"),
         {
           requestBody: body(
-            object({
-              id: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,64}$" },
-              name: { type: "string", minLength: 1, maxLength: 100 },
-            }),
+            object(
+              {
+                id: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,64}$" },
+                name: { type: "string", minLength: 1, maxLength: 100 },
+                pairingPhoneNumber,
+              },
+              ["id", "name"],
+            ),
           ),
           responses: {
             201: response(ref("Session"), "Sessão criada"),
@@ -606,7 +618,31 @@ export const openapi = {
     "/sessions/{id}/connect": {
       post: operation("Sessões", "Conectar ou reconectar", ref("Session"), {
         parameters: [id],
+        description:
+          "Sem corpo, usa QR ou restaura o perfil existente. Informe pairingPhoneNumber para vincular por código. Desconecte antes de trocar o método ou o número de uma sessão já iniciada.",
+        requestBody: {
+          required: false,
+          content: json(object({ pairingPhoneNumber }, [])),
+        },
       }),
+    },
+    "/sessions/{id}/pairing-code": {
+      get: operation(
+        "Sessões",
+        "Consultar código de vinculação",
+        object({
+          sessionId: string,
+          status: string,
+          phoneNumber: { type: "string", nullable: true },
+          code: { type: "string", nullable: true },
+          expiresAt: { type: "string", format: "date-time", nullable: true },
+        }),
+        {
+          parameters: [id],
+          description:
+            "Consulte a cada 3 segundos enquanto status=pairing. O código de 8 caracteres é temporário, mantido apenas em memória e renovado automaticamente. code e expiresAt são null quando ainda não existe código vigente ou após autenticar. expiresAt limita sua exibição no WappHub a três minutos; o WhatsApp valida o código no celular.",
+        },
+      ),
     },
     "/sessions/{id}/disconnect": {
       post: operation(
