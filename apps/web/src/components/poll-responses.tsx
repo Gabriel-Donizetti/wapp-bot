@@ -25,10 +25,17 @@ export function PollResponses({
       {open && (
         <Modal title="Respostas da enquete" onClose={close}>
           <ErrorBox message={result.error} />
+          <ErrorBox message={result.data?.warning ?? undefined} />
           {result.loading && !result.data && <Loading />}
           {result.data && (
             <div className="poll-results">
               <h3>{result.data.name}</h3>
+              <p>
+                {result.data.expired
+                  ? "Prazo encerrado no WappHub"
+                  : "Enquete ativa"}{" "}
+                · Até {dateTime(result.data.expiresAt)}
+              </p>
               <p>
                 {result.data.totalVoters}{" "}
                 {result.data.totalVoters === 1
@@ -71,12 +78,22 @@ export function PollResponses({
                   <p>Nenhuma resposta disponível nesta consulta.</p>
                 )}
               </div>
-              <small>Consultado em {dateTime(result.data.fetchedAt)}</small>
+              <small>
+                {result.data.source === "stored"
+                  ? "Votos salvos"
+                  : "Atualizado do WhatsApp"}{" "}
+                ·{" "}
+                {result.data.syncedAt
+                  ? dateTime(result.data.syncedAt)
+                  : "Sem coleta confirmada"}
+              </small>
             </div>
           )}
           <p className="footnote">
-            Respostas disponíveis no histórico da sessão conectada. A consulta
-            atualiza a cada 15 segundos enquanto esta janela estiver aberta.
+            Os votos coletados ficam salvos. A consulta atualiza a cada 15
+            segundos enquanto esta janela estiver aberta; votos após o prazo são
+            desconsiderados. Se a sessão ficar offline, os dados salvos são
+            identificados como tal.
           </p>
           <button
             className="secondary"

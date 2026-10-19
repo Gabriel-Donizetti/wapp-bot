@@ -130,6 +130,11 @@ o Swagger e o painel compilado ficam em `http://127.0.0.1:3000`.
 Pare os containers da instalação antes de restaurar perfis ou reutilizar portas.
 Não abra a mesma sessão em uma API local e outra em Docker ao mesmo tempo.
 
+O watcher do Vite aguarda a gravação dos arquivos estabilizar antes de recompilar.
+Isso reduz módulos vazios em cache durante formatação e troca de branch. Se um
+servidor antigo ainda servir um módulo vazio, reinicie o frontend e recarregue a
+página; HTTP 200 sozinho não comprova que o React renderizou.
+
 Para migrar um PostgreSQL em Docker para um PostgreSQL nativo, pare a API,
 faça `pg_dump --no-owner --no-privileges`, restaure em um banco local vazio e
 copie o perfil offline para `data/auth`. Preserve backup do `.env`, banco e
@@ -194,3 +199,41 @@ O encerramento HTTP aguarda as respostas ativas, incluindo chamadas de envio,
 e fecha conexões de preconnect sem requisição. Isso evita que o recarregamento
 local fique preso aguardando uma conexão ociosa do navegador. A confirmação
 continua sujeita à política de resultados incertos descrita acima.
+
+## Prazo e coleta de votos das enquetes
+
+A migração 004 cria `poll_votes` e `poll_sync` e atribui 24 horas às enquetes
+antigas sem duração. O prazo é calculado a partir da submissão; registros
+incertos sem ID usam a criação. Agendamentos pendentes iniciam o prazo somente
+após enviar. Nenhum registro é excluído quando a enquete expira.
+
+O job de enquetes roda a cada minuto e coleta até 50 enquetes por sessão em cada
+ciclo, enquanto a sessão estiver pronta. Também coleta ao conectar e quando a
+biblioteca informa mudanças de votos. A janela de respostas pode ficar fechada.
+Os votos são persistidos por sessão, ID WhatsApp, participante e horário, o que
+preserva seleções já coletadas mesmo depois de uma nova seleção ou retirada.
+
+As queries da lista de ativas e do job excluem enquetes expiradas. O job exige
+`expiresAt > NOW()`, mesmo quando ainda não houve coleta. Não existe coleta final
+após o prazo; eventos e consultas manuais também respeitam esse limite. As
+respostas no histórico usam somente os dados salvos e consideram a última versão
+coletada de cada participante até o limite;
+votos posteriores ficam fora da contagem. A biblioteca instalada não oferece
+encerramento nativo da votação no chat. O WappHub não exclui a mensagem nem
+altera permissões do grupo para simular esse bloqueio.
+
+As expiradas saem de **Enquetes**, mas seguem em **Histórico** e **Agendamentos**.
+`GET /polls?state=expired` também permite listá-las. Se a sessão estiver offline
+ou a consulta falhar, dados já coletados são retornados como `source: stored`,
+com a última coleta e um aviso. Sem dados anteriores, a consulta retorna erro.
+Expiradas sem coleta confirmada retornam HTTP 409 (`POLL_RESULTS_UNAVAILABLE`).
+Ausência de ID confirmado impede localizar os votos de uma tentativa incerta.
+
+Consulte os logs `Falha ao coletar votos de enquete` se o job não conseguir
+consultar o WhatsApp. A leitura normaliza IDs das opções, bytes dos votos e IDs
+de participantes do armazenamento local do WhatsApp, sem depender do formato do
+evento. O patch da biblioteca aguarda a gravação nativa antes de normalizar e
+emitir os eventos; uma falha no evento não interrompe a persistência do voto no
+WhatsApp. Ao atualizar a biblioteca, valide `poll-compatibility.test.ts` também.
+O snapshot local do WhatsApp pode não permitir reconstruir escolhas de períodos
+offline ou entre coletas: os resultados representam os votos coletados.

@@ -289,6 +289,13 @@ try {
   );
   assert.equal(client.deliveries.at(-1)!.options?.sendMediaAsDocument, true);
   await page.select('select[name="messageType"]', "poll");
+  assert.equal(
+    await page.$eval(
+      'input[name="pollDurationHours"]',
+      (node) => (node as HTMLInputElement).value,
+    ),
+    "24",
+  );
   await page.type('input[name="pollName"]', "Qual horário?");
   await page.type('textarea[name="pollOptions"]', "Manhã\nTarde");
   await page.click(".message-panel button.primary");
@@ -337,8 +344,91 @@ try {
     await page.$eval("tbody", (node) => node.textContent || ""),
     /Mensagem pelo React/,
   );
+  // Mais de uma página em outra sessão: o filtro deve isolar os registros
+  // e voltar à primeira página, preservando o status selecionado.
+  for (let index = 0; index < 21; index++) {
+    await f.messages.send(
+      {
+        sessionId: "suporte",
+        to: "5511888888888",
+        text: `Histórico suporte ${index}`,
+      },
+      f.user.id,
+    );
+  }
+  await page.click(".page-title button.secondary");
+  await page.waitForFunction(
+    () => document.querySelectorAll("tbody tr").length === 20,
+  );
+  await page.click('button[aria-label="Próxima página"]');
+  await page.waitForFunction(() =>
+    document.querySelector(".pagination span")?.textContent?.includes("21–25"),
+  );
+  await page.select('select[aria-label="Filtrar por sessão"]', "comercial");
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".pagination span")
+      ?.textContent?.includes("1–4 de 4"),
+  );
+  assert.deepEqual(
+    await page.$$eval("tbody tr td:nth-child(2) strong", (nodes) => [
+      ...new Set(nodes.map((node) => node.textContent)),
+    ]),
+    ["comercial"],
+  );
+  await page.select('select[aria-label="Filtrar status"]', "read");
+  await page.waitForFunction(
+    () => document.querySelectorAll("tbody tr").length === 1,
+  );
+  await page.select('select[aria-label="Filtrar por sessão"]', "suporte");
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".empty h3")?.textContent ===
+      "Nenhum resultado com esses filtros",
+  );
+  assert.equal(
+    await page.$eval(
+      'select[aria-label="Filtrar status"]',
+      (node) => (node as HTMLSelectElement).value,
+    ),
+    "read",
+  );
+  await page.select('select[aria-label="Filtrar status"]', "");
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".pagination span")
+      ?.textContent?.includes("1–20 de 21"),
+  );
+  assert.deepEqual(
+    await page.$$eval("tbody tr td:nth-child(2) strong", (nodes) => [
+      ...new Set(nodes.map((node) => node.textContent)),
+    ]),
+    ["suporte"],
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-history-session-filter.png"),
+    fullPage: true,
+  });
+  await page.setViewport({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.setViewport({ width: 1440, height: 980 });
+  await page.select('select[aria-label="Filtrar por sessão"]', "");
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".pagination span")
+      ?.textContent?.includes("1–20 de 25"),
+  );
   await nav("Enquetes");
   await page.waitForSelector(".poll-overview");
+  assert.match(
+    await page.$eval(".poll-overview", (node) => node.textContent || ""),
+    /Sai da lista em/,
+  );
   assert.equal((await page.$$(".poll-overview")).length, 1);
   assert.match(
     await page.$eval(".poll-overview", (node) => node.textContent || ""),
@@ -352,6 +442,16 @@ try {
   });
   await page.keyboard.press("Escape");
   await page.waitForSelector(".modal", { hidden: true });
+  await f.pool.query(
+    "UPDATE messages SET sent_at=NOW()-INTERVAL '2 days' WHERE type='poll'",
+  );
+  await page.click(".page-actions button");
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".empty h3")?.textContent ===
+      "Nenhuma enquete ativa",
+  );
+  assert.equal((await f.call("get", "/polls?state=expired")).body.total, 1);
   await page.click(".page-title button.primary");
   await page.waitForSelector('input[name="pollName"]');
   assert.equal(

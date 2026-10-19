@@ -68,3 +68,51 @@ patch(
   bridgeMarker,
 );
 if (source !== bridgeOriginal) writeFileSync(bridgePath, source);
+
+// Persiste primeiro no WhatsApp. IDs renomeados ou falhas na emissão do evento
+// não podem interromper o bulkUpsert nativo e descartar a atualização de votos.
+const clientPath = require.resolve("whatsapp-web.js/src/Client.js");
+const clientOriginal = readFileSync(clientPath, "utf8");
+source = clientOriginal;
+const voteMarker =
+  "            // WappHub: preserva os votos nativos antes de emitir eventos normalizados.";
+if (!source.includes(voteMarker)) {
+  const hooks = source.match(
+    /^            window\.WWebJS\.injectToFunction\(\n                \{\n                    module: 'WAWebAddonPollVoteTableMode',[\s\S]*?^            \);\n/gm,
+  );
+  if (hooks?.length !== 1)
+    throw new Error("Hook de votos do whatsapp-web.js diferente do esperado.");
+  patch(
+    hooks[0],
+    `${voteMarker}
+            window.WWebJS.injectToFunction(
+                { module: 'WAWebAddonPollVoteTableMode', function: 'pollVoteTableMode.bulkUpsert' },
+                async (module, origFunction, ...args) => {
+                    const result = await origFunction.apply(module, args);
+                    try {
+                        const parents = new Set(args[0].map(vote => {
+                            const key = vote.pollUpdateParentKey;
+                            return typeof key === 'string' ? key : key?._serialized ?? key?.$1;
+                        }).filter(Boolean));
+                        for (const id of parents) {
+                            const parent = Msg.get(id) ?? (await Msg.getMessagesById([id]))?.messages?.[0];
+                            if (!parent) continue;
+                            const rows = await window.require('WAWebPollsVotesSchema').getTable().equals(['parentMsgKey'], id);
+                            await window.onPollVoteEvent(rows.map(row => ({
+                                ...row,
+                                sender: typeof row.sender === 'string' ? row.sender : row.sender?._serialized ?? row.sender?.$1,
+                                selectedOptionLocalIds: Array.from(new Uint8Array(row.selectedOptionLocalIds)),
+                                parentMessage: window.WWebJS.getMessageModel(parent),
+                            })));
+                        }
+                    } catch (error) {
+                        console.warn('WappHub: votos persistidos no WhatsApp; evento indisponível. A coleta periódica tentará recuperá-los.');
+                    }
+                    return result;
+                },
+            );
+`,
+    voteMarker,
+  );
+}
+if (source !== clientOriginal) writeFileSync(clientPath, source);

@@ -3,13 +3,18 @@ import type { MessageInput } from "../../shared/validation.js";
 import type { Sessions } from "../sessions/session-service.js";
 import { MessageRepository } from "./message-repository.js";
 import { pollResults } from "./poll-results.js";
+import { PollVoteRepository } from "./poll-vote-repository.js";
 export class MessageService {
   constructor(
     readonly repository: MessageRepository,
     private sessions: Pick<Sessions, "send" | "refreshReceipt" | "pollVotes">,
   ) {}
   async pollResults(id: string) {
-    return pollResults(await this.repository.get(id), this.sessions);
+    return pollResults(
+      await this.repository.get(id),
+      this.sessions,
+      new PollVoteRepository(this.repository.pool),
+    );
   }
   async refresh(id: string) {
     const record = await this.repository.get(id);

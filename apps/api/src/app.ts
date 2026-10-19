@@ -108,9 +108,15 @@ export function buildApp(deps: Dependencies) {
   const polls = new PollRepository(deps.pool);
   api.get("/polls", async (req, res) => {
     const query = z
-      .object({ ...pagination, sessionId: sessionIdSchema.optional() })
+      .object({
+        ...pagination,
+        sessionId: sessionIdSchema.optional(),
+        state: z.enum(["active", "expired", "all"]).default("active"),
+      })
       .parse(req.query);
-    res.json(await polls.list(query.sessionId, query.limit, query.offset));
+    res.json(
+      await polls.list(query.sessionId, query.limit, query.offset, query.state),
+    );
   });
   api.use("/sessions", sessionRoutes(deps.sessionRepository, deps.sessions));
   api.use("/messages", messageRoutes(deps.messages));

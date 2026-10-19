@@ -126,6 +126,22 @@ export function MessageFields({ type }: { type: MessageType }) {
           <input name="pollName" maxLength={255} required />
         </label>
         <label>
+          Duração da enquete (horas)
+          <input
+            name="pollDurationHours"
+            type="number"
+            min={1}
+            max={720}
+            step={1}
+            defaultValue={24}
+            required
+          />
+          <small>
+            Após esse prazo, sai da lista de enquetes ativas. O prazo começa
+            quando o envio retorna um ID. A votação pode continuar no WhatsApp.
+          </small>
+        </label>
+        <label>
           Opções, uma por linha
           <textarea
             name="pollOptions"
@@ -178,6 +194,7 @@ export async function readMessageContent(
       type,
       poll: {
         name: value(form, "pollName"),
+        durationHours: Number(value(form, "pollDurationHours") || 24),
         options: value(form, "pollOptions")
           .split("\n")
           .map((item) => item.trim())

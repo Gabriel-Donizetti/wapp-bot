@@ -6,6 +6,7 @@ import type { Sessions } from "../sessions/session-service.js";
 import { AppError } from "../../shared/errors.js";
 import { ScheduleRepository } from "./schedule-repository.js";
 import { pollResults } from "../messages/poll-results.js";
+import { PollVoteRepository } from "../messages/poll-vote-repository.js";
 export function scheduleRoutes(
   repository: ScheduleRepository,
   sessions: Pick<Sessions, "refreshReceipt" | "pollVotes">,
@@ -44,7 +45,11 @@ export function scheduleRoutes(
   });
   router.get("/:id/poll-results", async (req, res) => {
     res.json(
-      await pollResults(await repository.get(uuidParam(req.params)), sessions),
+      await pollResults(
+        await repository.get(uuidParam(req.params)),
+        sessions,
+        new PollVoteRepository(repository.pool),
+      ),
     );
   });
   router.get("/:id", async (req, res) => {

@@ -9,6 +9,7 @@ import { prepareMessage } from "../messages/whatsapp-message.js";
 import { validAck, type Receipt } from "../messages/delivery-repository.js";
 import type { MessageInput } from "../../shared/validation.js";
 import { readGroupSummaries, type GroupSummary } from "./groups.js";
+import { readPollVotes, type PollVoteData } from "./poll-votes.js";
 
 const { Client, LocalAuth } = whatsapp;
 export type ClientPort = Pick<
@@ -22,12 +23,12 @@ export type ClientPort = Pick<
   | "getNumberId"
   | "getContactById"
   | "getMessageById"
-  | "getPollVotes"
   | "sendMessage"
   | "info"
 > & {
   listGroups(): Promise<GroupSummary[]>;
   isConnected(): Promise<boolean>;
+  getPollVotes(messageId: string): Promise<PollVoteData[]>;
 };
 export interface SendResult {
   sessionId: string;
@@ -38,6 +39,7 @@ export interface SendResult {
 export interface DeliveryHooks {
   receipt(receipt: Receipt): Promise<void>;
   ready?(sessionId: string): Promise<void>;
+  pollChanged?(sessionId: string): Promise<void>;
 }
 export type ClientFactory = (id: string) => ClientPort;
 type State =
@@ -81,6 +83,10 @@ export function clientFactory(authPath: string): ClientFactory {
       },
     });
     return Object.assign(client, {
+      async getPollVotes(messageId: string) {
+        if (!client.pupPage) throw new Error("Navegador indisponível.");
+        return client.pupPage.evaluate(readPollVotes, messageId);
+      },
       async isConnected() {
         const page = client.pupPage;
         if (!client.pupBrowser?.isConnected() || !page || page.isClosed())
@@ -307,6 +313,10 @@ export class Sessions {
         };
       };
       runtime.client.on("code", receiveCode);
+      runtime.client.on("vote_update", () => {
+        if (current() && runtime.status === "ready")
+          this.queueReceipt(this.delivery?.pollChanged?.(id), id);
+      });
       runtime.client.on("qr", (qr) => {
         if (!current()) return;
         if (runtime.pairingPhoneNumber) {

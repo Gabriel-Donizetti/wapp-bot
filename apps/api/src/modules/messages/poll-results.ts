@@ -1,10 +1,12 @@
 import type { Message, PollResults, Schedule } from "@wapp/contracts";
 import { AppError } from "../../shared/errors.js";
 import type { Sessions } from "../sessions/session-service.js";
+import { PollVoteRepository } from "./poll-vote-repository.js";
 
 export async function pollResults(
   record: Message | Schedule,
   sessions: Pick<Sessions, "pollVotes">,
+  store: PollVoteRepository,
 ): Promise<PollResults> {
   const poll = record.content.poll;
   if (record.type !== "poll" || !poll)
@@ -15,7 +17,58 @@ export async function pollResults(
       "POLL_NOT_SENT",
       "A enquete ainda não possui um ID WhatsApp para consultar.",
     );
-  const received = await sessions.pollVotes(record.sessionId, record.messageId);
+  const expiresAt = new Date(
+    Date.parse(record.submittedAt ?? record.createdAt) +
+      (poll.durationHours ?? 24) * 3600_000,
+  ).toISOString();
+  const expired = Date.parse(expiresAt) <= Date.now();
+  let snapshot = await store.snapshot(
+    record.sessionId,
+    record.messageId,
+    expiresAt,
+  );
+  let source: "whatsapp" | "stored" = "stored";
+  let warning: string | null = null;
+  if (expired && !snapshot.syncedAt)
+    throw new AppError(
+      409,
+      "POLL_RESULTS_UNAVAILABLE",
+      "O prazo da enquete terminou sem uma coleta confirmada de respostas.",
+    );
+  if (!expired) {
+    try {
+      const live = await sessions.pollVotes(record.sessionId, record.messageId);
+      for (const vote of live) {
+        if (
+          typeof vote.voter !== "string" ||
+          !vote.voter ||
+          !Number.isFinite(vote.interractedAtTs) ||
+          vote.interractedAtTs <= 0 ||
+          !Array.isArray(vote.selectedOptions) ||
+          vote.selectedOptions.some(
+            (option) => !poll.options.includes(option.name),
+          )
+        )
+          throw new AppError(
+            502,
+            "POLL_UNAVAILABLE",
+            "O WhatsApp retornou respostas que não puderam ser identificadas.",
+          );
+      }
+      await store.save(record.sessionId, record.messageId, live);
+      snapshot = await store.snapshot(
+        record.sessionId,
+        record.messageId,
+        expiresAt,
+      );
+      source = "whatsapp";
+    } catch (error) {
+      if (!snapshot.syncedAt) throw error;
+      warning =
+        "Não foi possível atualizar no WhatsApp. Exibindo os votos já coletados.";
+    }
+  }
+  const received = snapshot.votes;
   const latest = new Map<string, (typeof received)[number]>();
   for (const vote of received) {
     const previous = latest.get(vote.voter);
@@ -66,5 +119,10 @@ export async function pollResults(
     options,
     votes,
     fetchedAt: new Date().toISOString(),
+    expiresAt,
+    expired,
+    source,
+    syncedAt: snapshot.syncedAt ?? null,
+    warning,
   };
 }

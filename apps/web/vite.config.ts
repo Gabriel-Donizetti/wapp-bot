@@ -4,6 +4,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    watch: {
+      // Aguarda gravações completas antes de recompilar, inclusive no checkout.
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+    },
     proxy: {
       "/health": "http://127.0.0.1:3000",
       "/integration-guide": "http://127.0.0.1:3000",

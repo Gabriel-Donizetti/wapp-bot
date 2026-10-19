@@ -308,13 +308,24 @@ contatos arbitrários ou importação de arquivos vCard.
   "poll": {
     "name": "Qual horário?",
     "options": ["Manhã", "Tarde"],
-    "allowMultipleAnswers": false
+    "allowMultipleAnswers": false,
+    "durationHours": 24
   }
 }
 ```
 
 A pergunta aceita até 255 caracteres; cada opção aceita até 100. Opções que só
 diferem por espaços nas pontas ou maiúsculas são consideradas repetidas.
+
+`poll.durationHours` define o prazo de acompanhamento no WappHub, entre 1 e 720
+horas. O padrão é **24 horas**, inclusive para registros antigos sem prazo.
+A contagem começa quando o envio retorna um ID (`startedAt`/`submittedAt`);
+agendamentos pendentes aguardam o envio. Registros antigos de resultado incerto,
+sem ID, usam a criação como referência de expiração.
+
+Ao expirar, a enquete sai da lista de ativas, sem ser apagada do Histórico ou de
+Agendamentos. Esse prazo não encerra a votação no WhatsApp: a biblioteca
+instalada não expõe um método nativo para bloquear novos votos no chat.
 
 ### Consultar respostas da enquete
 
@@ -323,10 +334,11 @@ os agendamentos, permite filtrar pela sessão e oferece **Ver respostas da enque
 O botão **Nova enquete** abre o formulário com o tipo Enquete selecionado.
 As respostas também continuam acessíveis pelo Histórico e por Agendamentos.
 
-Na API, `GET /polls` lista somente enquetes, com filtros `sessionId`, `limit` e
+Na API, `GET /polls` lista somente enquetes ativas. Use `state=expired` para as
+expiradas ou `state=all` para todas; também aceita `sessionId`, `limit` e
 `offset`. Cada item informa `kind` (`messages` ou `schedules`), `recordId`,
 `sessionId`, `to`, `poll`, `deliveryStatus`, `messageId`, `createdAt`, `startedAt`
-e `sendAt`. `startedAt` indica quando o envio retornou um ID; a confirmação
+e `sendAt`, além de `expiresAt` e `expired`. `startedAt` indica quando o envio retornou um ID; a confirmação
 continua sendo informada por `deliveryStatus`. Agendamentos ainda não enviados
 não possuem respostas para consultar.
 
@@ -338,8 +350,9 @@ curl "$BASE/messages/UUID_DO_REGISTRO/poll-results" \
 ```
 
 Para uma enquete agendada já enviada, use
-`GET /schedules/UUID_DO_AGENDAMENTO/poll-results`. Ambas exigem JWT e sessão
-`ready`. Os IDs dessas rotas são os UUIDs do WappHub, não o `messageId` WhatsApp.
+`GET /schedules/UUID_DO_AGENDAMENTO/poll-results`. Ambas exigem JWT. Uma nova
+coleta exige sessão `ready`; dados já coletados podem ser consultados offline.
+Os IDs dessas rotas são os UUIDs do WappHub, não o `messageId` WhatsApp.
 
 Exemplo de resposta com múltiplas escolhas:
 
@@ -366,16 +379,42 @@ Exemplo de resposta com múltiplas escolhas:
       "updatedAt": "2030-10-20T12:10:00.000Z"
     }
   ],
-  "fetchedAt": "2030-10-20T12:11:00.000Z"
+  "fetchedAt": "2030-10-20T12:11:00.000Z",
+  "expiresAt": "2030-10-21T12:00:00.000Z",
+  "expired": false,
+  "source": "whatsapp",
+  "syncedAt": "2030-10-20T12:11:00.000Z",
+  "warning": null
 }
 ```
 
-A consulta usa [getPollVotes](https://docs.wwebjs.dev/Client.html#getPollVotes)
-e retorna as respostas disponíveis no histórico local do WhatsApp conectado.
-O WappHub não armazena os votos; cada consulta busca um retrato atual. A mensagem
-precisa estar disponível: se não estiver, a API responde `POLL_UNAVAILABLE`,
-sem afirmar que não há votos. Mensagens de outros tipos geram `NOT_A_POLL`;
-enquetes sem ID de envio geram `POLL_NOT_SENT`.
+Um job coleta o snapshot de votos do WhatsApp **a cada minuto**, em lotes de até
+50 enquetes por sessão, sem sobrepor ciclos. A conexão da sessão e os eventos de
+voto disponibilizados pela biblioteca também disparam uma coleta. Abrir a janela
+de respostas faz uma consulta direta enquanto a enquete estiver ativa; não é
+necessário mantê-la aberta para o job. A query do job seleciona apenas enquetes
+com `expiresAt > NOW()`. Ao atingir o prazo, nenhuma nova coleta é iniciada,
+inclusive por eventos ou consultas manuais.
+
+As versões coletadas ficam no PostgreSQL. Para cada participante, a contagem
+considera a última seleção coletada com horário até `expiresAt`, incluindo
+retiradas. Votos posteriores ao prazo não entram na contagem. Depois da
+expiração, a API retorna apenas as respostas já salvas, sem coleta final no
+WhatsApp.
+
+`source: "whatsapp"` identifica uma atualização concluída; `source: "stored"`
+identifica dados salvos. `syncedAt` informa a última coleta bem-sucedida. Se a
+atualização falhar e houver dados anteriores, a API os retorna com `warning`,
+inclusive offline. Sem coleta anterior, indisponibilidade gera erro, não zero
+votos. Uma enquete expirada sem coleta confirmada retorna HTTP 409 com
+`POLL_RESULTS_UNAVAILABLE`. Mensagens de outros tipos geram `NOT_A_POLL`; enquetes sem ID confirmado
+geram `POLL_NOT_SENT` e não podem ter seus votos consultados automaticamente.
+
+A coleta depende da disponibilidade do histórico local do WhatsApp. Períodos
+offline ou alterações entre coletas podem impedir recuperar uma seleção anterior
+ao prazo se ela já tiver sido substituída no WhatsApp. A contagem preserva os
+votos efetivamente coletados; não garante reconstrução completa de períodos sem
+coleta.
 
 `totalVoters` conta participantes com pelo menos uma escolha ativa.
 `totalSelections` soma escolhas e pode superar o número de participantes.
@@ -435,6 +474,12 @@ com filtros `sessionId`, `status`, `limit` e `offset`. A resposta inclui `type`,
 `content` (conteúdo/metadados), `text` (resumo para compatibilidade com o painel),
 `status`, `messageId`, datas e erro. O base64 não aparece nas respostas nem é
 armazenado no histórico imediato; mídia contém MIME, nome, tamanho e SHA-256.
+
+No painel, use **Histórico → Sessão** para escolher uma sessão pelo nome e ID,
+ou **Todas as sessões** para consultar o conjunto. O filtro funciona junto com
+**Status** e volta à primeira página ao mudar. O mesmo controle está disponível
+em **Agendamentos**. Na API, por exemplo:
+`GET /messages?sessionId=comercial&status=delivered&limit=20&offset=0`.
 
 | Estado      | Significado                                                          |
 | ----------- | -------------------------------------------------------------------- |

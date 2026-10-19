@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import type { Message, Page, Schedule } from "@wapp/contracts";
+import type { Message, Page, Schedule, Session } from "@wapp/contracts";
 import { api } from "../lib/api";
 import { useResource } from "../lib/use-resource";
 import {
@@ -13,12 +13,19 @@ import {
 } from "../components/ui";
 import { PollResponses } from "../components/poll-responses";
 import { DeliveryStatus } from "../components/delivery-status";
-export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
+export function HistoryPage({
+  kind,
+  sessions,
+}: {
+  kind: "messages" | "schedules";
+  sessions: Session[];
+}) {
+  const [sessionId, setSessionId] = useState("");
   const [status, setStatus] = useState("");
   const [offset, setOffset] = useState(0);
   const limit = 20;
   const resource = useResource<Page<Message | Schedule>>(
-    `/${kind}?limit=${limit}&offset=${offset}${status ? `&status=${status}` : ""}`,
+    `/${kind}?limit=${limit}&offset=${offset}${status ? `&status=${status}` : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
   );
   const action = useAction();
   const scheduling = kind === "schedules";
@@ -47,47 +54,71 @@ export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
             {resource.data?.total || 0}{" "}
             {scheduling ? "agendamentos" : "mensagens"}
           </h2>
-          <label className="filter-label">
-            Status
-            <select
-              aria-label="Filtrar status"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                setOffset(0);
-              }}
-            >
-              <option value="">Todos os status</option>
-              {(scheduling
-                ? [
-                    "pending",
-                    "sending",
-                    "submitted",
-                    "sent",
-                    "delivered",
-                    "read",
-                    "played",
-                    "failed",
-                    "unknown",
-                    "cancelled",
-                  ]
-                : [
-                    "sending",
-                    "submitted",
-                    "sent",
-                    "delivered",
-                    "read",
-                    "played",
-                    "failed",
-                    "unknown",
-                  ]
-              ).map((value) => (
-                <option key={value} value={value}>
-                  {statusNames[value]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="page-actions">
+            <label className="filter-label">
+              Sessão
+              <select
+                aria-label="Filtrar por sessão"
+                value={sessionId}
+                onChange={(event) => {
+                  setSessionId(event.target.value);
+                  setOffset(0);
+                }}
+              >
+                <option value="">Todas as sessões</option>
+                {sessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.name} ({session.id})
+                  </option>
+                ))}
+                {sessionId &&
+                !sessions.some((session) => session.id === sessionId) ? (
+                  <option value={sessionId}>{sessionId} (indisponível)</option>
+                ) : null}
+              </select>
+            </label>
+            <label className="filter-label">
+              Status
+              <select
+                aria-label="Filtrar status"
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.target.value);
+                  setOffset(0);
+                }}
+              >
+                <option value="">Todos os status</option>
+                {(scheduling
+                  ? [
+                      "pending",
+                      "sending",
+                      "submitted",
+                      "sent",
+                      "delivered",
+                      "read",
+                      "played",
+                      "failed",
+                      "unknown",
+                      "cancelled",
+                    ]
+                  : [
+                      "sending",
+                      "submitted",
+                      "sent",
+                      "delivered",
+                      "read",
+                      "played",
+                      "failed",
+                      "unknown",
+                    ]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {statusNames[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
         <ErrorBox message={resource.error} />
         {action.feedback}
@@ -186,14 +217,18 @@ export function HistoryPage({ kind }: { kind: "messages" | "schedules" }) {
         ) : (
           <Empty
             title={
-              scheduling
-                ? "Nenhum agendamento por aqui"
-                : "Seu histórico começa com uma mensagem"
+              sessionId || status
+                ? "Nenhum resultado com esses filtros"
+                : scheduling
+                  ? "Nenhum agendamento por aqui"
+                  : "Seu histórico começa com uma mensagem"
             }
           >
-            {scheduling
-              ? "Programe uma mensagem na página Nova mensagem."
-              : "Os envios aparecerão aqui com seu resultado."}
+            {sessionId || status
+              ? "Escolha outra sessão ou status para consultar os registros."
+              : scheduling
+                ? "Programe uma mensagem na página Nova mensagem."
+                : "Os envios aparecerão aqui com seu resultado."}
           </Empty>
         )}
       </section>

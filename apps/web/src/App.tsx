@@ -180,9 +180,9 @@ function Dashboard() {
               initialType={composeType}
             />
           ) : page === "messages" ? (
-            <HistoryPage key="messages" kind="messages" />
+            <HistoryPage key="messages" kind="messages" sessions={rows} />
           ) : page === "schedules" ? (
-            <HistoryPage key="schedules" kind="schedules" />
+            <HistoryPage key="schedules" kind="schedules" sessions={rows} />
           ) : page === "polls" ? (
             <PollsPage
               sessions={rows}
