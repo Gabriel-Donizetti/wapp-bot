@@ -4,6 +4,9 @@ O WappHub fornece uma API REST para conectar sessões WhatsApp e enviar mensagen
 imediatas ou agendadas. A base local é `http://127.0.0.1:3000/api/v1`.
 O painel de desenvolvimento também encaminha a API em `http://127.0.0.1:5173`.
 
+Para subir o serviço com PostgreSQL e configurar ambiente e primeiro acesso,
+consulte `docs/docker.md` no repositório do projeto.
+
 - Swagger executável: `/docs/`.
 - Contrato importável em Postman/Insomnia: `/openapi.json`.
 - Este guia no navegador: `/integration-guide`.

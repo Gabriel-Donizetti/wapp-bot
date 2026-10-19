@@ -29,7 +29,12 @@ destinatários e respeite as regras da plataforma.
 
 ## Iniciar com Docker
 
-Requisitos: Node.js 24 para gerar a configuração e Docker com Compose.
+O [guia Docker](docs/docker.md) detalha as variáveis de ambiente, o primeiro
+acesso, a persistência e as URLs para integrar outros aplicativos. Inclui uma
+opção para gerar a configuração sem instalar Node.js no host.
+
+Requisito: Docker com Compose. O exemplo abaixo usa Node.js 24 no host para
+gerar a configuração; a alternativa sem Node no host está no guia Docker.
 
 ```bash
 git clone https://github.com/Gabriel-Donizetti/wapp-bot.git
