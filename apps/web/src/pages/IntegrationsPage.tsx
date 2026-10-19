@@ -57,7 +57,7 @@ export function IntegrationsPage() {
           {
             icon: Smartphone,
             title: "2. Conecte a sessão",
-            text: "Cadastre uma sessão e consulte seu QR Code. Aguarde o estado ready antes do envio.",
+            text: "Cadastre uma sessão e conecte por QR Code ou informe pairingPhoneNumber para obter um código de vinculação. Confirme no celular e aguarde o estado ready antes do envio.",
           },
           {
             icon: Send,

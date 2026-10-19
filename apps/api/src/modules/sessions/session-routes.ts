@@ -10,16 +10,28 @@ export function sessionRoutes(
   sessions: Sessions,
 ) {
   const router = Router();
+  const connection = z
+    .object({
+      pairingPhoneNumber: z
+        .string()
+        .trim()
+        .regex(
+          /^\+?[1-9]\d{7,14}$/,
+          "Informe o número com DDI, apenas números (ex.: 5511999999999).",
+        )
+        .transform((value) => value.replace(/^\+/, ""))
+        .optional(),
+    })
+    .strict();
   router.get("/", async (_req, res) => {
     res.json({ sessions: await sessions.list() });
   });
   router.post("/", async (req, res) => {
-    const data = z
-      .object({ id: sessionIdSchema, name: z.string().trim().min(1).max(100) })
-      .strict()
+    const data = connection
+      .extend({ id: sessionIdSchema, name: z.string().trim().min(1).max(100) })
       .parse(req.body);
     await repository.create(data.id, data.name);
-    res.status(201).json(await sessions.start(data.id));
+    res.status(201).json(await sessions.start(data.id, data));
   });
   router.get("/:id", async (req, res) => {
     res.json(await sessions.get(idParam(req.params)));
@@ -27,8 +39,12 @@ export function sessionRoutes(
   router.get("/:id/qr", async (req, res) => {
     res.json(await sessions.qr(idParam(req.params)));
   });
+  router.get("/:id/pairing-code", async (req, res) => {
+    res.json(await sessions.pairingCode(idParam(req.params)));
+  });
   router.post("/:id/connect", async (req, res) => {
-    res.json(await sessions.start(idParam(req.params)));
+    const options = connection.parse(req.body ?? {});
+    res.json(await sessions.start(idParam(req.params), options));
   });
   router.post("/:id/disconnect", async (req, res) => {
     res.json(await sessions.disconnect(idParam(req.params)));

@@ -12,7 +12,7 @@ PostgreSQL, histórico de envios e execução com Docker Compose.
 
 ## O que você pode fazer
 
-- Conectar vários números por QR Code e restaurar os perfis após reinícios.
+- Conectar vários números por QR Code ou código de vinculação e restaurar os perfis após reinícios.
 - Enviar texto, imagem, áudio, voz, vídeo/GIF, documentos, figurinhas, localização,
   cartões de contato e enquetes para pessoas, grupos ou canais compatíveis.
 - Responder mensagens, mencionar pessoas/grupos e consultar os resultados.
@@ -50,9 +50,11 @@ Entre no painel e altere a senha em **Minha conta**. Depois, remova a senha de
 bootstrap do `.env` e exclua `data/initial-admin.txt`. O bootstrap só cria o
 primeiro usuário quando o banco está vazio; não redefine senhas existentes.
 
-Adicione uma sessão em **Sessões** e escaneie o QR Code em **WhatsApp → Aparelhos
-conectados → Conectar aparelho**. Aguarde o estado **Conectada**. O cadastro no
-WappHub não cria uma conta de WhatsApp.
+Adicione uma sessão em **Sessões** e escolha QR Code ou código com número de
+telefone. Para usar código, informe o número com DDI e digite o código exibido
+no WhatsApp em **Aparelhos conectados → Conectar aparelho → Conectar com número
+de telefone**. Aguarde o estado **Conectada**. O cadastro no WappHub não cria uma
+conta de WhatsApp.
 
 ```bash
 docker compose ps
@@ -126,7 +128,7 @@ apps/
       http/                  # Contrato OpenAPI e consultas
       modules/
         auth/                # Usuários, senhas, JWT e revogação
-        sessions/            # Conexões, QR e agenda WhatsApp
+        sessions/            # Conexões por QR/código e agenda WhatsApp
         messages/            # Envio, histórico e idempotência
         schedules/           # Agendamento e processamento
       shared/                # Erros e validação de entradas
@@ -168,7 +170,7 @@ segredos pelo ambiente local e evite colocá-los no histórico do shell.
 Base: `/api/v1`. O login é público; as demais operações exigem
 `Authorization: Bearer <accessToken>`. `/health`, `/docs/` e `/openapi.json` são
 públicos e não retornam dados das sessões. O contrato completo está no Swagger. Veja o [guia de integração](docs/integration.md)
-com autenticação, ciclo de sessão/QR, todos os tipos, exemplos em Node.js/Python,
+com autenticação, ciclo de sessão por QR/código, todos os tipos, exemplos em Node.js/Python,
 idempotência, limites, agendamento e tratamento de erros. Importe
 `/openapi.json` no Postman ou Insomnia; cada tipo tem contrato e exemplo.
 
@@ -177,7 +179,7 @@ idempotência, limites, agendamento e tratamento de erros. Importe
 | Acesso       | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/change-password`                                                   |
 | Usuários     | `GET/POST /auth/users` — administrador                                                                                                  |
 | Sessões      | `GET/POST /sessions`, `GET/DELETE /sessions/:id`                                                                                        |
-| Conexão      | `GET /sessions/:id/qr`, `POST /sessions/:id/connect`, `POST /sessions/:id/disconnect`                                                   |
+| Conexão      | `GET /sessions/:id/qr`, `GET /sessions/:id/pairing-code`, `POST /sessions/:id/connect`, `POST /sessions/:id/disconnect`                 |
 | Agenda       | `GET /sessions/:id/directory`, `GET /sessions/:id/contacts`, `GET /sessions/:id/groups`, `GET /sessions/:id/channels`, `GET /directory` |
 | Mensagens    | `POST /messages` ou `/messages/{tipo}`, `GET /messages`, `GET /messages/:id`                                                            |
 | Agendamentos | `POST /schedules`, `GET /schedules`, `GET /schedules/:id`, `POST /schedules/:id/cancel`                                                 |

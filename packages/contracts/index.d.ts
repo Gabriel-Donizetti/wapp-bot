@@ -11,9 +11,22 @@ export interface Session {
   name: string;
   createdAt: string;
   status:
-    "starting" | "qr" | "authenticated" | "ready" | "disconnected" | "error";
+    | "starting"
+    | "qr"
+    | "pairing"
+    | "authenticated"
+    | "ready"
+    | "disconnected"
+    | "error";
   phone: string | null;
   error: string | null;
+}
+export interface PairingCode {
+  sessionId: string;
+  status: Session["status"];
+  phoneNumber: string | null;
+  code: string | null;
+  expiresAt: string | null;
 }
 export interface Contact {
   id: string;

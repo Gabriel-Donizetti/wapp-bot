@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, LoaderCircle, X } from "lucide-react";
 export const statusNames: Record<string, string> = {
   starting: "Iniciando",
   qr: "Aguardando QR",
+  pairing: "Aguardando código",
   authenticated: "Sincronizando",
   ready: "Conectada",
   disconnected: "Desconectada",

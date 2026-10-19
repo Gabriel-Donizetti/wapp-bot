@@ -80,10 +80,45 @@ try {
       (document.querySelector(".qr-box img") as HTMLImageElement)?.naturalWidth,
     ),
   );
+  await page.click(".qr-box .text-button");
+  await page.waitForSelector('.modal input[name="pairingPhoneNumber"]');
+  await page.type('.modal input[name="pairingPhoneNumber"]', "5511999999999");
+  await page.click(".modal button.primary");
+  await page.waitForFunction(() => !document.querySelector(".modal"));
+  const pairingClient = f.clients.get("suporte")!;
+  pairingClient.emit("qr", "qr-interno-pairing");
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".pairing-box output")?.textContent ===
+      "ABCD-1234",
+  );
+  assert.equal(await page.$(".qr-box img"), null);
+  assert.deepEqual(pairingClient.pairingRequests, ["5511999999999"]);
+  pairingClient.emit("code", "WXYZ5678");
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".pairing-box output")?.textContent ===
+      "WXYZ-5678",
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-session-pairing.png"),
+    fullPage: true,
+  });
+  // Volta ao QR pela interface e confirma que a sessão antiga não interfere.
+  await page.click(".pairing-box .text-button");
+  await page.waitForSelector('.modal select[name="connectionMethod"]');
+  assert.equal(await page.$('.modal input[name="pairingPhoneNumber"]'), null);
+  await page.click(".modal button.primary");
+  await page.waitForFunction(() => !document.querySelector(".modal"));
+  f.clients.get("suporte")!.emit("qr", "qr-react-restaurado");
+  pairingClient.emit("code", "OLDX1234");
+  await page.waitForSelector(".qr-box img");
+  assert.equal(await page.$(".pairing-box"), null);
   f.clients.get("suporte")!.emit("ready");
   await page.waitForFunction(
     () => document.querySelectorAll(".badge.ready").length === 2,
   );
+  assert.equal(await page.$(".pairing-box output"), null);
   await nav("Nova mensagem");
   await page.waitForSelector(".recipient");
   client.emit("authenticated");

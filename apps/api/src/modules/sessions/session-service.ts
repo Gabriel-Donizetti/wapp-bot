@@ -15,6 +15,7 @@ export type ClientPort = Pick<
   whatsapp.Client,
   | "on"
   | "initialize"
+  | "requestPairingCode"
   | "destroy"
   | "getContacts"
   | "getChannels"
@@ -40,7 +41,16 @@ export interface DeliveryHooks {
 }
 export type ClientFactory = (id: string) => ClientPort;
 type State =
-  "starting" | "qr" | "authenticated" | "ready" | "disconnected" | "error";
+  | "starting"
+  | "qr"
+  | "pairing"
+  | "authenticated"
+  | "ready"
+  | "disconnected"
+  | "error";
+export interface ConnectionOptions {
+  pairingPhoneNumber?: string;
+}
 interface Runtime {
   client: ClientPort;
   status: State;
@@ -49,6 +59,9 @@ interface Runtime {
   phone: string | null;
   activeSends: number;
   initializing: boolean;
+  pairingPhoneNumber?: string;
+  pairingRequested: boolean;
+  pairingCode: { code: string; expiresAt: string } | null;
 }
 
 export function clientFactory(authPath: string): ClientFactory {
@@ -200,6 +213,26 @@ export class Sessions {
     };
   }
 
+  async pairingCode(id: string) {
+    const session = await this.get(id);
+    const runtime = this.runtimes.get(id);
+    const pairing = runtime?.pairingCode;
+    const available =
+      session.status === "pairing" &&
+      pairing &&
+      Date.parse(pairing.expiresAt) > Date.now();
+    return {
+      sessionId: id,
+      status: session.status,
+      phoneNumber:
+        session.status === "pairing"
+          ? (runtime?.pairingPhoneNumber ?? null)
+          : null,
+      code: available ? pairing.code : null,
+      expiresAt: available ? pairing.expiresAt : null,
+    };
+  }
+
   isReady(id: string) {
     return (
       !this.operations.has(id) && this.runtimes.get(id)?.status === "ready"
@@ -220,16 +253,28 @@ export class Sessions {
     return runtime;
   }
 
-  async start(id: string) {
+  async start(id: string, options: ConnectionOptions = {}) {
     await this.repository.get(id);
     if (this.closing || this.operations.has(id))
       throw new AppError(409, "SESSION_BUSY", "Sessão ocupada.");
     const previous = this.runtimes.get(id);
     if (
       previous &&
-      ["starting", "qr", "authenticated", "ready"].includes(previous.status)
-    )
+      ["starting", "qr", "pairing", "authenticated", "ready"].includes(
+        previous.status,
+      )
+    ) {
+      if (
+        options.pairingPhoneNumber &&
+        previous.pairingPhoneNumber !== options.pairingPhoneNumber
+      )
+        throw new AppError(
+          409,
+          "SESSION_ALREADY_STARTED",
+          "A sessão já está iniciada. Desconecte antes de alterar o método ou número de vinculação.",
+        );
       return this.get(id);
+    }
     this.operations.add(id);
     try {
       if (previous) await this.dispose(id, previous);
@@ -241,11 +286,55 @@ export class Sessions {
         phone: null,
         activeSends: 0,
         initializing: true,
+        pairingPhoneNumber: options.pairingPhoneNumber,
+        pairingRequested: false,
+        pairingCode: null,
       };
       this.runtimes.set(id, runtime);
       const current = () => this.runtimes.get(id) === runtime && !this.closing;
+      const receiveCode = (code: string) => {
+        if (
+          !current() ||
+          !runtime.pairingPhoneNumber ||
+          !["starting", "pairing"].includes(runtime.status)
+        )
+          return;
+        if (!/^[A-Z0-9]{8}$/i.test(code)) return;
+        runtime.status = "pairing";
+        runtime.pairingCode = {
+          code,
+          expiresAt: new Date(Date.now() + 180_000).toISOString(),
+        };
+      };
+      runtime.client.on("code", receiveCode);
       runtime.client.on("qr", (qr) => {
         if (!current()) return;
+        if (runtime.pairingPhoneNumber) {
+          if (!["starting", "pairing"].includes(runtime.status)) return;
+          runtime.status = "pairing";
+          if (!runtime.pairingRequested) {
+            runtime.pairingRequested = true;
+            void withTimeout(
+              runtime.client.requestPairingCode(
+                runtime.pairingPhoneNumber,
+                true,
+                180_000,
+              ),
+              30_000,
+            )
+              .then(receiveCode)
+              .catch((error) => {
+                this.onError(error, id);
+                if (current() && runtime.status === "pairing") {
+                  runtime.status = "error";
+                  runtime.pairingCode = null;
+                  runtime.error =
+                    "Não foi possível gerar o código. Confira o número com DDI e tente reconectar.";
+                }
+              });
+          }
+          return;
+        }
         runtime.status = "qr";
         runtime.qr = null;
         void QRCode.toDataURL(qr)
@@ -280,12 +369,14 @@ export class Sessions {
         if (current()) {
           runtime.status = "authenticated";
           runtime.qr = null;
+          runtime.pairingCode = null;
         }
       });
       runtime.client.on("ready", () => {
         if (current()) {
           runtime.status = "ready";
           runtime.qr = null;
+          runtime.pairingCode = null;
           runtime.error = null;
           const wid = runtime.client.info?.wid;
           runtime.phone = wid?.server === "c.us" ? wid.user : null;
@@ -296,6 +387,7 @@ export class Sessions {
         if (current()) {
           runtime.status = "error";
           runtime.qr = null;
+          runtime.pairingCode = null;
           runtime.error = "Falha na autenticação. Reconecte a sessão.";
         }
       });
@@ -303,6 +395,7 @@ export class Sessions {
         if (current()) {
           runtime.status = "disconnected";
           runtime.qr = null;
+          runtime.pairingCode = null;
           runtime.error = "WhatsApp desconectado. Reconecte a sessão.";
         }
       });

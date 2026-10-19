@@ -13,7 +13,7 @@ A versão `whatsapp-web.js@1.34.7` recebe correções locais por
 
 Se a sessão permanecer em **Sincronizando**, é possível reiniciar a conexão em
 **Sessões**, sem apagar o perfil. O formulário de envio distingue inicialização,
-leitura de QR, sincronização, desconexão e falha da consulta. Quando a sessão
+leitura de QR, confirmação de código, sincronização, desconexão e falha da consulta. Quando a sessão
 fica pronta, carrega a lista automaticamente e repete a consulta a cada 15
 segundos; falhas não são apresentadas como zero contatos.
 
@@ -32,6 +32,36 @@ execute `npm run postinstall` antes de iniciar a API.
 
 Falhas no envio mantêm a causa técnica nos logs do servidor e o estado público
 incerto quando não houver confirmação. A correção não reenvia tentativas antigas.
+
+## Vinculação por QR ou código
+
+Em **Sessões → Nova sessão → Forma de conexão**, escolha QR Code ou código com
+número de telefone. Para usar código, informe o número com DDI, sem espaços ou
+pontuação. Um `+` inicial é aceito. Confirme o código no WhatsApp desse celular
+em **Aparelhos conectados → Conectar aparelho → Conectar com número de telefone**.
+
+O estado `pairing` indica que a sessão aguarda a confirmação do código. A geração
+pode demorar; o painel consulta o código a cada três segundos e mostra as novas
+versões automaticamente. Use sempre o código mais recente. O WappHub deixa de
+exibi-lo após três minutos, até receber outro; a validade efetiva é verificada
+pelo WhatsApp. Após a confirmação, a sessão passa por `authenticated` até `ready`.
+
+Se a geração falhar, confira o número e use **Reconectar**. No cartão da sessão,
+**Conectar por código** e **Usar QR Code** permitem trocar o método. A troca
+reinicia a conexão e preserva o perfil. Se a API informar `SESSION_BUSY`, aguarde
+a inicialização ou o envio em andamento terminar antes de tentar novamente.
+
+Desconectar preserva a autenticação: mudar o método ou informar outro telefone
+não substitui uma conta já vinculada naquele perfil. Use uma nova sessão para
+outro número. Após reiniciar a API, perfis autenticados são restaurados; uma
+vinculação ainda pendente volta ao QR por padrão. Escolha novamente o método por
+código se necessário.
+
+Códigos e o número solicitado para vinculação ficam apenas em memória. O código
+não aparece na listagem de sessões e deixa de ser disponibilizado após
+autenticação, desconexão ou falha. Não publique códigos ou QR em logs e capturas.
+As rotas exigem JWT; veja os exemplos e contratos no
+[guia de integração](integration.md#conectar-por-código-sem-escanear-qr).
 
 ## Preservar uma instalação local ao passar para Docker
 
