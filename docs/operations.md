@@ -171,9 +171,10 @@ atrasados. O campo interno `sent_at` dos registros antigos preserva o instante
 de submissão e é exposto como `submittedAt`; o `sentAt` público vem do ACK.
 
 A migração 003 cria recibos sem ACK para IDs legados. Não inventa confirmação
-para mensagens antigas. O monitor consulta no máximo 50 pendências por sessão
-e ciclo, a cada 5 minutos, e também roda após a conexão. Voz e áudio podem
-continuar sendo consultados depois de lidos para recuperar a reprodução.
+para mensagens antigas. O monitor automático de confirmações está desativado:
+não é iniciado no servidor e não há consulta de recuperação ao reconectar.
+Entrega, leitura e reprodução continuam sendo atualizadas pelos eventos de ACK.
+Sem novos eventos, o status salvo permanece até uma consulta manual explícita.
 
 Consultas sem resultado preservam o status anterior. Não conclua falha apenas
 por falta de ACK ou por a mensagem não estar mais disponível no cache da sessão.

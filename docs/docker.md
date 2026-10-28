@@ -136,10 +136,11 @@ imagem. Não é necessário instalar navegador no host.
 | `TEST_DATABASE_URL`     | Banco exclusivo dos testes locais/CI; não é usado pelos serviços do Compose.                                                                                                                                            |
 | `LOCAL_POSTGRES_BIN`    | Caminho de `pg_ctl`/`initdb` para o helper de banco local; não é usado em Docker.                                                                                                                                       |
 
-O monitor de confirmações de entrega usa um intervalo de cinco minutos, definido
-no código. `SCHEDULER_INTERVAL_MS` controla outro job e não altera esse monitor.
-ACKs continuam atualizando os recibos em tempo real. A listagem de sessões também
-verifica se a comunicação com o navegador permanece disponível.
+O monitor automático de confirmações de entrega está desativado, inclusive na
+reconexão. ACKs recebidos por eventos continuam atualizando os recibos.
+`SCHEDULER_INTERVAL_MS` controla apenas a execução dos agendamentos; não ativa
+consultas de confirmação. A listagem de sessões verifica a comunicação com o
+navegador, sem consultar o histórico das conversas.
 
 Depois de mudar uma variável usada pelo Compose, recrie o serviço para aplicar
 o novo ambiente:
