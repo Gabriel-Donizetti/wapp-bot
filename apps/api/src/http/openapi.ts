@@ -732,7 +732,7 @@ export const openapi = {
         {
           parameters: [id],
           description:
-            "Requer sessão ready e ID WhatsApp conhecido. Preserva o status se a mensagem não estiver disponível. Também há acompanhamento automático por ACK e reconciliação periódica.",
+            "Requer sessão ready e ID WhatsApp conhecido. Preserva o status se a mensagem não estiver disponível. O acompanhamento automático usa apenas eventos de ACK; a consulta periódica e a recuperação ao reconectar estão desativadas. Esta rota faz uma consulta manual explícita.",
         },
       ),
     },

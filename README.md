@@ -279,8 +279,10 @@ retorna `warnings` quando contatos ou grupos estiverem indisponíveis.
 | `unknown`   | Resultado incerto; confira antes de repetir.           |
 | `cancelled` | Agendamento cancelado.                                 |
 
-O acompanhamento usa ACKs persistidos e consulta de recuperação a cada 5 minutos
-com a sessão conectada. O painel atualiza a lista e exibe as etapas com horários.
+O acompanhamento usa os ACKs recebidos pelos eventos do WhatsApp e persistidos
+no banco. A consulta automática a cada cinco minutos e a recuperação ao reconectar
+estão desativadas. O painel atualiza a lista com os dados salvos e exibe as etapas
+com horários; essa atualização não consulta as conversas no WhatsApp.
 As respostas incluem `ack`, `submittedAt`, `sentAt`, `deliveredAt`, `readAt`,
 `playedAt`, `lastAckAt` e `lastCheckedAt`. Os horários são os da observação pelo
 WappHub. Leia o [guia de integração](docs/integration.md#5-idempotência-e-acompanhamento)

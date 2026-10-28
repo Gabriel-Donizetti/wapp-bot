@@ -14,7 +14,6 @@ import { ScheduleRepository } from "./modules/schedules/schedule-repository.js";
 import { MessageRepository } from "./modules/messages/message-repository.js";
 import { MessageService } from "./modules/messages/message-service.js";
 import { DeliveryRepository } from "./modules/messages/delivery-repository.js";
-import { DeliveryMonitor } from "./modules/messages/delivery-monitor.js";
 import { PollMonitor } from "./modules/messages/poll-monitor.js";
 import { PollRepository } from "./modules/messages/poll-repository.js";
 import { prepareShutdown } from "./http/server-lifecycle.js";
@@ -33,7 +32,6 @@ const sessionRepository = new SessionRepository(pool);
 const schedules = new ScheduleRepository(pool);
 const messages = new MessageRepository(pool);
 const receipts = new DeliveryRepository(pool);
-let deliveryMonitor: DeliveryMonitor;
 let pollMonitor: PollMonitor;
 const authPath = join(config.DATA_DIR, "auth");
 const sessions = new Sessions(
@@ -45,19 +43,12 @@ const sessions = new Sessions(
   {
     receipt: (receipt) => receipts.observe(receipt),
     ready: async () => {
-      await deliveryMonitor?.tick();
       await pollMonitor?.tick();
     },
     pollChanged: async () => {
       await pollMonitor?.tick();
     },
   },
-);
-deliveryMonitor = new DeliveryMonitor(receipts, sessions, (error, sessionId) =>
-  log.error(
-    { err: error, sessionId },
-    "Falha ao consultar confirmação de envio",
-  ),
 );
 const scheduler = new Scheduler(schedules, sessions);
 pollMonitor = new PollMonitor(
@@ -86,7 +77,6 @@ const shutdown = async () => {
   stopping = true;
   const drain = drainHttp?.() ?? Promise.resolve();
   await scheduler.stop();
-  await deliveryMonitor.stop();
   await pollMonitor.stop();
   await drain;
   await sessions.close();
@@ -132,7 +122,6 @@ try {
   await scheduler.start(config.SCHEDULER_INTERVAL_MS, (error) =>
     log.error({ err: error }, "Falha no agendador"),
   );
-  deliveryMonitor.start();
   pollMonitor.start();
   server = app.listen(config.PORT, config.HOST);
   drainHttp = prepareShutdown(server);
