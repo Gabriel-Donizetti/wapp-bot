@@ -54,6 +54,9 @@ export function messageRoutes(service: MessageService) {
   router.get("/:id/poll-results", async (req, res) => {
     res.json(await service.pollResults(uuidParam(req.params)));
   });
+  router.get("/:id/read-receipts", async (req, res) => {
+    res.json(await service.groupReadReceipts(uuidParam(req.params)));
+  });
   router.get("/:id", async (req, res) => {
     res.json(await service.repository.get(uuidParam(req.params)));
   });

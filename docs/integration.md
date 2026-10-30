@@ -13,29 +13,69 @@ consulte `docs/docker.md` no repositório do projeto.
 
 ## 1. Criar uma conta de integração e autenticar
 
-Um administrador cria um usuário com `POST /auth/users`. Use um operador
-dedicado por aplicativo. Todos compartilham as sessões e os dados do mesmo
-workspace; não há isolamento por cliente. Nenhuma credencial é publicada nos
-exemplos. Guarde usuário/senha no backend do aplicativo integrador.
+Um administrador escolhe **Integração (token)** ao criar um usuário no painel.
+Informe apenas o nome do aplicativo. A integração recebe acesso de operador às
+sessões e aos dados do workspace, sem usuário ou senha. Não há isolamento por
+cliente; crie uma integração para cada aplicativo.
+
+Também é possível cadastrar usando o JWT de um administrador:
+
+```http
+POST /api/v1/auth/users
+Authorization: Bearer TOKEN_DO_ADMINISTRADOR
+Content-Type: application/json
+
+{"type":"integration","name":"Meu aplicativo"}
+```
+
+A resposta HTTP 201 contém os dados da conta (`type: "integration"`,
+`username: null`, `role: "operator"`) e o campo `token`. Copie-o e guarde-o no
+backend do aplicativo: ele é mostrado apenas na criação ou substituição. A
+listagem de usuários e `GET /auth/me` nunca retornam esse token. O banco armazena
+somente seu hash SHA-256; não há como recuperá-lo depois.
+
+O token começa com `wapp_int_`, tem 256 bits aleatórios e não expira
+automaticamente. Use-o diretamente, sem chamar `/auth/login`:
+
+```http
+Authorization: Bearer TOKEN_DA_INTEGRACAO
+```
+
+O administrador gerencia o token em **Usuários** ou nestas rotas:
+
+- `POST /auth/users/{id}/token`: gera outro token, invalida o anterior e retorna
+  `{ "user": {...}, "token": "..." }`. Também reativa uma integração revogada.
+- `DELETE /auth/users/{id}/token`: revoga o token e desativa a integração.
+
+A revogação e a substituição valem na próxima requisição. O ID da integração
+permanece o mesmo, preservando autoria e chaves de idempotência. Sem guardar o
+token original, gere outro e atualize o aplicativo. Integrações não podem criar
+usuários, gerenciar tokens ou alterar senha. Uma chamada a `POST /auth/logout`
+com o próprio token também o revoga. Contas normais retornam
+`404 INTEGRATION_NOT_FOUND` nas rotas de gestão de token.
+
+### Usuários normais: login por senha
+
+Contas existentes continuam sendo usuários normais. Para criar uma nova, use
+`type: "user"` (padrão quando omitido), `name`, `username`, `password` e o
+perfil `operator` ou `admin`. Integrações aceitam somente `type` e `name`;
+enviar senha, usuário, token próprio ou perfil retorna HTTP 400.
 
 ```http
 POST /api/v1/auth/login
 Content-Type: application/json
 
-{"username":"meu-app","password":"SENHA_DA_INTEGRACAO"}
+{"username":"operador","password":"SENHA_DO_USUARIO"}
 ```
 
-A resposta contém `accessToken`, `tokenType: "Bearer"`, `expiresIn` em segundos
-e `user`. A validade padrão é 28.800 segundos (8 horas). Use o token em todas
-as operações seguintes:
+O login retorna `accessToken` (JWT), `tokenType: "Bearer"`, `expiresIn` e `user`.
+A validade padrão é oito horas. Renove o login ao expirar o JWT. Logout revoga a
+sessão atual; trocar a senha revoga todos os JWTs desse usuário. Esses fluxos não
+alteram tokens de integração de outras contas. `GET /auth/me` aceita ambos os
+tipos de token. Não há refresh token.
 
-```http
-Authorization: Bearer SEU_ACCESS_TOKEN
-```
-
-Renove o login ao expirar o token. `POST /auth/logout` revoga o token atual.
-`POST /auth/change-password` revoga todos os tokens do usuário. `GET /auth/me`
-consulta a conta autenticada. Não existe refresh token ou API key permanente.
+Em produção, use HTTPS e envie o token somente pelo cabeçalho Authorization.
+Não coloque tokens em URLs, no frontend público ou no repositório.
 
 ## 2. Cadastrar e conectar uma sessão
 
@@ -189,7 +229,7 @@ Idempotency-Key: pedido-123-confirmacao
 {"sessionId":"comercial","to":"5511999999999","text":"Pedido recebido."}
 ```
 
-O mesmo envio com cURL, usando o token obtido no login:
+O mesmo envio com cURL, usando o token de integração ou JWT de usuário normal:
 
 ```bash
 curl --request POST http://127.0.0.1:3000/api/v1/messages/text \
@@ -199,7 +239,7 @@ curl --request POST http://127.0.0.1:3000/api/v1/messages/text \
   --data '{"sessionId":"comercial","to":"5511999999999","text":"Pedido recebido."}'
 ```
 
-Defina `WAPP_TOKEN` com o `accessToken` recebido. Reutilize a mesma chave ao
+Defina `WAPP_TOKEN` com o token de integração ou o JWT recebido no login. Reutilize a mesma chave ao
 repetir a mesma operação; novas operações precisam de novas chaves.
 
 ### Imagem, áudio, voz, vídeo, documento e figurinha
@@ -217,16 +257,9 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 const base = process.env.WAPP_URL || "http://127.0.0.1:3000/api/v1";
-const loginResponse = await fetch(`${base}/auth/login`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    username: process.env.WAPP_USERNAME,
-    password: process.env.WAPP_PASSWORD,
-  }),
-});
-if (!loginResponse.ok) throw new Error(await loginResponse.text());
-const { accessToken } = await loginResponse.json();
+const accessToken = process.env.WAPP_TOKEN;
+if (!accessToken)
+  throw new Error("Defina WAPP_TOKEN com o token da integração.");
 
 // Guarde a chave junto à operação no seu banco ANTES da primeira tentativa.
 const key = randomUUID();
@@ -350,7 +383,7 @@ curl "$BASE/messages/UUID_DO_REGISTRO/poll-results" \
 ```
 
 Para uma enquete agendada já enviada, use
-`GET /schedules/UUID_DO_AGENDAMENTO/poll-results`. Ambas exigem JWT. Uma nova
+`GET /schedules/UUID_DO_AGENDAMENTO/poll-results`. Ambas exigem Bearer (JWT ou token de integração). Uma nova
 coleta exige sessão `ready`; dados já coletados podem ser consultados offline.
 Os IDs dessas rotas são os UUIDs do WappHub, não o `messageId` WhatsApp.
 
@@ -514,8 +547,9 @@ reconectar estão desativadas. Sem novos eventos, o status salvo pode permanecer
 desatualizado; a atualização da lista do painel consulta apenas o banco.
 Registros antigos sem ID continuam com resultado incerto e não são reenviados.
 Eventos atrasados não
-rebaixam uma entrega/leitura já confirmada. Não são expostas confirmações
-individuais de participantes de grupos nem estatísticas de audiência de canais.
+rebaixam uma entrega/leitura já confirmada. O status geral não identifica quais
+participantes leram; use a consulta individual abaixo para grupos. Estatísticas
+de audiência de canais não são expostas.
 Leitura e reprodução dependem das confirmações disponibilizadas pelo WhatsApp;
 a ausência de confirmação não comprova ausência de leitura.
 
@@ -529,6 +563,57 @@ Essas rotas exigem sessão `ready` e `messageId` conhecido. Se a mensagem não
 estiver disponível na sessão, retornam `422 RECEIPT_UNAVAILABLE`, preservando o
 estado anterior. Um envio sem ID retorna `409 NO_MESSAGE_RECEIPT`. A consulta
 não cria outra mensagem e não tem efeito de retry.
+
+### Quem leu uma mensagem no grupo
+
+No painel, use **Quem leu no grupo** junto ao status no Histórico ou nos
+Agendamentos enviados. A janela mostra os participantes com leitura confirmada
+e atualiza a cada 15 segundos enquanto estiver aberta.
+
+Para integrar, use o UUID do registro WappHub:
+
+- `GET /messages/{id}/read-receipts` para envios imediatos.
+- `GET /schedules/{id}/read-receipts` para agendamentos já enviados.
+
+As rotas exigem Bearer (JWT ou token de integração), sessão `ready`, destino `@g.us` e `messageId` conhecido.
+Funcionam com qualquer tipo de mensagem enviado ao grupo. Exemplo de resposta:
+
+```json
+{
+  "sessionId": "comercial",
+  "messageId": "true_120363000000@g.us_EXEMPLO",
+  "groupId": "120363000000@g.us",
+  "totalReaders": 1,
+  "readers": [
+    {
+      "id": "5511888888888@c.us",
+      "name": "Ana",
+      "readAt": "2026-10-19T15:00:00.000Z"
+    }
+  ],
+  "fetchedAt": "2026-10-19T15:01:00.000Z"
+}
+```
+
+`name` usa o nome salvo na sessão, depois o nome de perfil ou nome curto. Pode
+ser `null` quando o WhatsApp não fornece nome ou a busca falha; o ID permanece
+disponível, inclusive para participantes identificados por `@lid`. `readAt` é o
+horário de leitura informado pelo WhatsApp, convertido para ISO UTC, ou `null`
+quando indisponível. Esses horários diferem do `readAt` do status geral, que
+representa quando o WappHub observou o ACK.
+
+Esta consulta é ao vivo e não persiste leitores no banco. Uma lista vazia indica
+que não há confirmações disponíveis; quem não aparece tem **leitura não
+confirmada**, o que não prova que não leu. A consulta não depende do ACK geral
+estar em `read` e não envia novamente a mensagem.
+
+Conversas individuais retornam `409 NOT_A_GROUP_MESSAGE`; envios sem ID,
+`409 NO_MESSAGE_RECEIPT`. Mensagem indisponível ou incompatível com a sessão e
+grupo retorna `422 GROUP_READERS_UNAVAILABLE`; falha na consulta ou formato
+indisponível, `502 GROUP_READERS_UNAVAILABLE`. Sessão desconectada retorna
+`409 SESSION_NOT_READY`; timeout pode retornar `504 WHATSAPP_TIMEOUT`.
+
+### Envios interrompidos
 
 Interrupções sem ID são recuperadas como `unknown`, sem reenvio automático.
 Se uma chamada ultrapassar o timeout mas retornar depois no mesmo processo,
@@ -576,7 +661,7 @@ a listagem antes de repetir. `Idempotency-Key` vale apenas para envios imediatos
 
 ## 7. Exemplo em Python
 
-Python 3, somente biblioteca padrão. Configure `WAPP_USERNAME` e `WAPP_PASSWORD`
+Python 3, somente biblioteca padrão. Configure `WAPP_TOKEN` com o token da integração
 no ambiente local. O arquivo precisa existir no computador do integrador.
 
 ```python
@@ -602,10 +687,7 @@ def post(path, payload, token=None, key=None):
     with urllib.request.urlopen(request, timeout=240) as response:
         return json.load(response)
 
-login = post("/auth/login", {
-    "username": os.environ["WAPP_USERNAME"],
-    "password": os.environ["WAPP_PASSWORD"],
-})
+token = os.environ["WAPP_TOKEN"]
 # Persista esta chave junto à operação antes de enviar; reutilize em retries.
 key = str(uuid.uuid4())
 result = post("/messages/image", {
@@ -617,7 +699,7 @@ result = post("/messages/image", {
         "data": base64.b64encode(Path("imagem.png").read_bytes()).decode(),
     },
     "caption": "Imagem da solicitação",
-}, token=login["accessToken"], key=key)
+}, token=token, key=key)
 print(result["id"], result["status"])
 ```
 

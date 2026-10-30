@@ -5,6 +5,7 @@ import { messageContentSchema } from "./migrations/002-message-content.js";
 
 import { deliveryReceiptsSchema } from "./migrations/003-delivery-receipts.js";
 import { pollVotesSchema } from "./migrations/004-poll-votes.js";
+import { integrationTokensSchema } from "./migrations/005-integration-tokens.js";
 
 export async function migrate(pool: Pool) {
   await transaction(pool, async (client) => {
@@ -17,6 +18,7 @@ export async function migrate(pool: Pool) {
       [2, messageContentSchema],
       [3, deliveryReceiptsSchema],
       [4, pollVotesSchema],
+      [5, integrationTokensSchema],
     ] as const) {
       const existing = await client.query(
         "SELECT version FROM schema_migrations WHERE version=$1",

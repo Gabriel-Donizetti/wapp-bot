@@ -211,18 +211,13 @@ reinício. Veja o [diagnóstico de vinculação](operations.md#vinculação-por-
 
 ## 5. Integrar outro aplicativo
 
-Crie no painel um usuário **Operador** dedicado ao aplicativo. Todos os usuários
-compartilham o mesmo workspace e as mesmas sessões; não há isolamento por cliente.
-Faça o login pelo backend do aplicativo:
+Crie no painel um acesso do tipo **Integração (token)** dedicado ao aplicativo.
+Informe apenas o nome e copie o token gerado, exibido uma única vez. Todos os
+usuários compartilham o workspace e as sessões; não há isolamento por cliente.
 
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
-
-{"username":"meu-app","password":"SENHA_DO_OPERADOR"}
-```
-
-Use o `accessToken` retornado como Bearer nas próximas requisições. Por exemplo,
+Use o token diretamente como Bearer, sem usuário, senha ou chamada de login.
+Ele não expira automaticamente: o administrador pode substituí-lo ou revogá-lo
+em **Usuários**. Guarde-o no backend do aplicativo. Por exemplo,
 para enviar texto por uma sessão já conectada:
 
 ```http

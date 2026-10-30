@@ -3,7 +3,7 @@
 # Uma central para suas conexões WhatsApp
 
 Monorepo para gerenciar sessões WhatsApp, enviar texto e mídia, consultar
-contatos e grupos e agendar mensagens. Inclui painel React, API Express com JWT,
+contatos e grupos e agendar mensagens. Inclui painel React, API Express com JWT e tokens de integração,
 PostgreSQL, histórico de envios e execução com Docker Compose.
 
 [![CI](https://github.com/Gabriel-Donizetti/wapp-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Gabriel-Donizetti/wapp-bot/actions/workflows/ci.yml)
@@ -164,8 +164,14 @@ tokens do usuário. O login tem limite de tentativas malsucedidas por IP.
 - **Operador:** usa sessões, contatos, mensagens e agendamentos.
 
 Todos compartilham um workspace. Não há isolamento por cliente/tenant. Para
-integrações, crie um operador dedicado a cada aplicativo. Não há cadastro
-público de usuários. Se precisar criar um usuário pelo terminal, defina
+integrações, selecione **Integração (token)** no cadastro e informe apenas o nome.
+O token é gerado e mostrado uma única vez; guarde-o no backend da integração.
+Use `Authorization: Bearer <token>` sem login por senha. A integração tem acesso
+de operador e não pode gerenciar usuários. O token não expira automaticamente;
+o administrador pode gerar outro ou revogá-lo em **Usuários**. Apenas o hash é
+armazenado no banco. Contas normais existentes mantêm o login atual.
+
+Não há cadastro público de usuários. Para criar um usuário normal pelo terminal, defina
 `CREATE_USER_USERNAME`, `CREATE_USER_PASSWORD`, `CREATE_USER_NAME` e,
 opcionalmente, `CREATE_USER_ROLE=admin`; execute `npm run user:create`. Passe
 segredos pelo ambiente local e evite colocá-los no histórico do shell.
@@ -173,7 +179,7 @@ segredos pelo ambiente local e evite colocá-los no histórico do shell.
 ## API para outros aplicativos
 
 Base: `/api/v1`. O login é público; as demais operações exigem
-`Authorization: Bearer <accessToken>`. `/health`, `/docs/` e `/openapi.json` são
+`Authorization: Bearer <token>` (JWT ou token de integração). `/health`, `/docs/` e `/openapi.json` são
 públicos e não retornam dados das sessões. O contrato completo está no Swagger. Veja o [guia de integração](docs/integration.md)
 com autenticação, ciclo de sessão por QR/código, todos os tipos, exemplos em Node.js/Python,
 idempotência, limites, agendamento e tratamento de erros. Importe
@@ -189,7 +195,7 @@ idempotência, limites, agendamento e tratamento de erros. Importe
 | Mensagens    | `POST /messages` ou `/messages/{tipo}`, `GET /messages`, `GET /messages/:id`                                                            |
 | Agendamentos | `POST /schedules`, `GET /schedules`, `GET /schedules/:id`, `POST /schedules/:id/cancel`                                                 |
 
-### Login e envio
+### Login de usuário normal e envio
 
 ```http
 POST /api/v1/auth/login
@@ -249,6 +255,17 @@ continuam no histórico, que oferece **Ver respostas da enquete**. A contagem us
 as seleções coletadas até o prazo. Após a expiração, os jobs deixam de coletar
 votos e as consultas retornam somente dados salvos; a votação no chat não é bloqueada.
 Veja o formato e os limites da consulta no [guia de integração](docs/integration.md#consultar-respostas-da-enquete).
+
+### Quem leu no grupo
+
+Em mensagens enviadas a grupos, clique em **Quem leu no grupo** no histórico ou
+nos agendamentos enviados para ver os nomes dos participantes com leitura
+confirmada e seus horários. A consulta exige sessão conectada e não armazena os
+leitores; nomes indisponíveis são substituídos pelo identificador do participante.
+Quem não aparece tem leitura não confirmada.
+
+Integrações podem usar `GET /messages/:id/read-receipts` e
+`GET /schedules/:id/read-receipts`. Veja o [contrato e os limites](docs/integration.md#quem-leu-uma-mensagem-no-grupo).
 
 ### Consultas e estados
 

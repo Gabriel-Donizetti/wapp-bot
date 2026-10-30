@@ -7,9 +7,10 @@ import { AppError } from "../../shared/errors.js";
 import { ScheduleRepository } from "./schedule-repository.js";
 import { pollResults } from "../messages/poll-results.js";
 import { PollVoteRepository } from "../messages/poll-vote-repository.js";
+import { groupReadReceipts } from "../messages/group-read-receipts.js";
 export function scheduleRoutes(
   repository: ScheduleRepository,
-  sessions: Pick<Sessions, "refreshReceipt" | "pollVotes">,
+  sessions: Pick<Sessions, "refreshReceipt" | "pollVotes" | "groupReaders">,
 ) {
   const router = Router();
   router.post("/", async (req, res) => {
@@ -54,6 +55,14 @@ export function scheduleRoutes(
   });
   router.get("/:id", async (req, res) => {
     res.json(await repository.get(uuidParam(req.params)));
+  });
+  router.get("/:id/read-receipts", async (req, res) => {
+    res.json(
+      await groupReadReceipts(
+        await repository.get(uuidParam(req.params)),
+        sessions,
+      ),
+    );
   });
   router.post("/:id/cancel", async (req, res) => {
     res.json(await repository.cancel(uuidParam(req.params)));

@@ -461,6 +461,69 @@ try {
     ),
     "poll",
   );
+  // A consulta de leitores ocorre somente ao abrir os detalhes do grupo.
+  const groupMessage = await f.messages.send(
+    {
+      sessionId: "comercial",
+      to: "120363000000@g.us",
+      text: "Leituras do grupo",
+    },
+    f.user.id,
+  );
+  client.messageInfo = {
+    read: [
+      { id: { _serialized: "5511888888888@c.us" }, t: 1792400000 },
+      { id: { $1: "123456789@lid" }, t: 1792400100 },
+    ],
+  };
+  assert.equal(client.infoRequests.length, 0);
+  await nav("Histórico");
+  await page.waitForSelector(".group-readers > button");
+  assert.equal((await page.$$(".group-readers > button")).length, 1);
+  await page.click(".group-readers > button");
+  await page.waitForSelector(".group-reader-list li");
+  const readerText = await page.$eval(
+    ".group-reader-results",
+    (node) => node.textContent || "",
+  );
+  assert.match(readerText, /2 participantes com leitura confirmada/);
+  assert.match(readerText, /Cliente/);
+  assert.match(readerText, /Contato privado/);
+  assert.match(readerText, /Leu em/);
+  assert.deepEqual(client.infoRequests, [groupMessage.record.messageId]);
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-group-readers.png"),
+    fullPage: false,
+  });
+  await page.setViewport({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-group-readers-mobile.png"),
+    fullPage: false,
+  });
+  client.messageInfo = { read: [] };
+  await page.click(".modal button.secondary");
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".group-reader-results")
+      ?.textContent?.includes("Nenhuma leitura confirmada"),
+  );
+  client.messageInfoError = true;
+  await page.click(".modal button.secondary");
+  await page.waitForSelector('.modal [role="alert"]');
+  assert.match(
+    await page.$eval('.modal [role="alert"]', (node) => node.textContent || ""),
+    /Não foi possível consultar/,
+  );
+  client.messageInfoError = false;
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".modal", { hidden: true });
+  await page.setViewport({ width: 1440, height: 980 });
   await nav("API & integrações");
   await page.waitForSelector(
     '.page-title a.primary[href="/integration-guide"]',
@@ -485,6 +548,90 @@ try {
   await page.waitForFunction(() =>
     document.querySelector(".users-grid")?.textContent?.includes("app-teste"),
   );
+  // Contas de integração recebem somente um token, apresentado uma vez.
+  await page.click(".page-title button.primary");
+  await page.select('.modal select[name="type"]', "integration");
+  assert.equal(await page.$('.modal input[name="username"]'), null);
+  assert.equal(await page.$('.modal input[name="password"]'), null);
+  assert.equal(await page.$('.modal select[name="role"]'), null);
+  await page.type('.modal input[name="name"]', "Sistema integrado");
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-integration-create.png"),
+  });
+  await page.setViewport({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-integration-create-mobile.png"),
+  });
+  await page.click(".modal button.primary");
+  await page.waitForSelector('textarea[aria-label="Token da integração"]');
+  const token = await page.$eval(
+    'textarea[aria-label="Token da integração"]',
+    (node) => (node as HTMLTextAreaElement).value,
+  );
+  assert.match(token, /^wapp_int_[A-Za-z0-9_-]{43}$/);
+  const tokenStatus = async (value: string) =>
+    (
+      await fetch(base + "/api/v1/sessions", {
+        headers: { Authorization: `Bearer ${value}` },
+      })
+    ).status;
+  assert.equal(await tokenStatus(token), 200);
+  await page.click(".modal button.primary");
+  await page.waitForSelector(".modal", { hidden: true });
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".users-grid")
+      ?.textContent?.includes("Sistema integrado"),
+  );
+  const clickTokenAction = async (label: string) => {
+    await page.evaluate((label) => {
+      const card = [...document.querySelectorAll(".user-card")].find(
+        (card) => card.querySelector("h3")?.textContent === "Sistema integrado",
+      );
+      const button = [...(card?.querySelectorAll("button") ?? [])].find(
+        (button) => button.textContent === label,
+      );
+      if (!button) throw new Error("Ação de token não encontrada");
+      button.click();
+    }, label);
+  };
+  await clickTokenAction("Gerar novo token");
+  await page.waitForSelector(".modal form");
+  await page.click(".modal button.primary");
+  await page.waitForSelector('textarea[aria-label="Token da integração"]');
+  const replacement = await page.$eval(
+    'textarea[aria-label="Token da integração"]',
+    (node) => (node as HTMLTextAreaElement).value,
+  );
+  assert.notEqual(replacement, token);
+  assert.equal(await tokenStatus(token), 401);
+  assert.equal(await tokenStatus(replacement), 200);
+  await page.click(".modal button.primary");
+  await page.waitForSelector(".modal", { hidden: true });
+  await clickTokenAction("Revogar token");
+  await page.waitForSelector(".modal form");
+  await page.click(".modal button.primary");
+  await page.waitForSelector(".modal", { hidden: true });
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".users-grid")
+      ?.textContent?.includes("Token revogado"),
+  );
+  assert.equal(await tokenStatus(replacement), 401);
+  assert.equal(
+    await page.$('textarea[aria-label="Token da integração"]'),
+    null,
+  );
+  await page.screenshot({
+    path: join(tmpdir(), "wapp-integration-revoked-mobile.png"),
+  });
+  await page.setViewport({ width: 1440, height: 980 });
   client.emit("disconnected", "teste");
   f.clients.get("suporte")!.emit("disconnected", "teste");
   await page.reload();
@@ -518,7 +665,7 @@ try {
   await page.waitForSelector(".swagger-ui .info");
   assert.deepEqual(errors, []);
   console.log(
-    "React + Express + PostgreSQL: login JWT, sessão/QR, filtros sem acentos, envios simulados de texto/imagem/documento/enquete, respostas de enquetes, guia acessível e home condicional, acompanhamento de submissão/entrega/leitura, consulta direta e filtro por status, agendamento/fuso, cancelamento, histórico, criação de usuário, recarga autenticada, logout, Swagger e layout móvel validados.",
+    "React + Express + PostgreSQL: login JWT, sessão/QR, filtros sem acentos, envios simulados de texto/imagem/documento/enquete, respostas de enquetes, guia acessível e home condicional, acompanhamento de submissão/entrega/leitura, consulta direta, leitores de grupo com nomes/horários e filtro por status, agendamento/fuso, cancelamento, histórico, criação de usuário e integração, token Bearer sem senha, rotação e revogação imediatas, recarga autenticada, logout, Swagger e layout móvel validados.",
   );
 } catch (error) {
   const pages = await browser.pages();

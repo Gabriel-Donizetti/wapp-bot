@@ -4,11 +4,18 @@ import type { Sessions } from "../sessions/session-service.js";
 import { MessageRepository } from "./message-repository.js";
 import { pollResults } from "./poll-results.js";
 import { PollVoteRepository } from "./poll-vote-repository.js";
+import { groupReadReceipts } from "./group-read-receipts.js";
 export class MessageService {
   constructor(
     readonly repository: MessageRepository,
-    private sessions: Pick<Sessions, "send" | "refreshReceipt" | "pollVotes">,
+    private sessions: Pick<
+      Sessions,
+      "send" | "refreshReceipt" | "pollVotes" | "groupReaders"
+    >,
   ) {}
+  async groupReadReceipts(id: string) {
+    return groupReadReceipts(await this.repository.get(id), this.sessions);
+  }
   async pollResults(id: string) {
     return pollResults(
       await this.repository.get(id),

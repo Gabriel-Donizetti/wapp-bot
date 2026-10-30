@@ -51,8 +51,8 @@ export function IntegrationsPage() {
         {[
           {
             icon: KeyRound,
-            title: "1. Autentique",
-            text: "Obtenha um JWT com usuário e senha. Crie uma conta de operador dedicada a cada aplicativo.",
+            title: "1. Crie uma integração",
+            text: "Em Usuários, escolha Integração (token), informe o nome e copie o token gerado. Use Authorization: Bearer <token> diretamente; não há login por senha.",
           },
           {
             icon: Smartphone,
@@ -79,9 +79,9 @@ export function IntegrationsPage() {
       </div>
       <section className="card code-card">
         <h2>Primeiro acesso</h2>
-        <p>Substitua os valores pelas credenciais da sua integração.</p>
+        <p>Crie uma integração em Usuários e substitua o token no exemplo.</p>
         <pre>
-          <code>{`curl -X POST ${origin}/api/v1/auth/login \\\n  -H 'Content-Type: application/json' \\\n  -d '{"username":"seu-app","password":"sua-senha"}'\n\ncurl ${origin}/api/v1/sessions \\\n  -H 'Authorization: Bearer SEU_TOKEN_JWT'`}</code>
+          <code>{`curl ${origin}/api/v1/sessions -H 'Authorization: Bearer TOKEN_DA_INTEGRACAO'`}</code>
         </pre>
         <p>
           <a href="/integration-guide" target="_blank" rel="noreferrer">
@@ -89,9 +89,10 @@ export function IntegrationsPage() {
           </a>
         </p>
         <p className="footnote">
-          O token tem validade limitada e pode ser revogado pelo endpoint de
-          logout. A documentação interativa contém todas as rotas, parâmetros e
-          respostas.
+          O token de integração não expira automaticamente. Ele é mostrado uma
+          única vez e pode ser substituído ou revogado por um administrador em
+          Usuários. Contas normais continuam usando login por senha e JWT. A
+          documentação interativa contém os contratos completos.
         </p>
       </section>
     </>

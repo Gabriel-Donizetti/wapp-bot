@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import whatsapp from "whatsapp-web.js";
+import type { GroupReadReceipts } from "@wapp/contracts";
 import QRCode from "qrcode";
 import { AppError } from "../../shared/errors.js";
 import { SessionRepository, type SessionRecord } from "./session-repository.js";
@@ -10,6 +11,7 @@ import { validAck, type Receipt } from "../messages/delivery-repository.js";
 import type { MessageInput } from "../../shared/validation.js";
 import { readGroupSummaries, type GroupSummary } from "./groups.js";
 import { readPollVotes, type PollVoteData } from "./poll-votes.js";
+import { normalizeReaders } from "./group-readers.js";
 
 const { Client, LocalAuth } = whatsapp;
 export type ClientPort = Pick<
@@ -616,6 +618,76 @@ export class Sessions {
       ack: validAck(message.ack),
       checked: true,
     });
+  }
+
+  async groupReaders(
+    sessionId: string,
+    messageId: string,
+    groupId: string,
+  ): Promise<GroupReadReceipts> {
+    const { client } = await this.ready(sessionId);
+    try {
+      const message = await withTimeout(
+        client.getMessageById(messageId),
+        15_000,
+      );
+      if (
+        !message?.fromMe ||
+        message.id.remote !== groupId ||
+        !groupId.endsWith("@g.us")
+      )
+        throw new AppError(
+          422,
+          "GROUP_READERS_UNAVAILABLE",
+          "A mensagem do grupo não está disponível nesta sessão.",
+        );
+      const readers = normalizeReaders(
+        await withTimeout(message.getInfo(), 15_000),
+      );
+      // Limita as consultas de nomes para grupos grandes. A confirmação continua
+      // válida quando o contato não tem nome disponível ou a consulta falha.
+      const deadline = Date.now() + 5000;
+      let index = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(8, readers.length) }, async () => {
+          while (index < readers.length && Date.now() < deadline) {
+            const reader = readers[index++]!;
+            try {
+              const contact = await withTimeout(
+                client.getContactById(reader.id),
+                1500,
+              );
+              reader.name =
+                contact.name?.trim() ||
+                contact.pushname?.trim() ||
+                contact.shortName?.trim() ||
+                null;
+            } catch {
+              /* Preserva o ID e o horário da confirmação. */
+            }
+          }
+        }),
+      );
+      readers.sort((a, b) =>
+        (a.name || a.id).localeCompare(b.name || b.id, "pt-BR"),
+      );
+      return {
+        sessionId,
+        messageId,
+        groupId,
+        totalReaders: readers.length,
+        readers,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      this.onError(error, sessionId);
+      throw new AppError(
+        502,
+        "GROUP_READERS_UNAVAILABLE",
+        "Não foi possível consultar quem leu a mensagem no WhatsApp. Tente novamente.",
+      );
+    }
   }
 
   async pollVotes(sessionId: string, messageId: string) {

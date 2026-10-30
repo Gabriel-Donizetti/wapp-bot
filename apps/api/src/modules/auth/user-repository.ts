@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { User } from "@wapp/contracts";
 import { type Pool, transaction } from "../../database/pool.js";
 import { AppError } from "../../shared/errors.js";
-const fields = 'id,username,name,role,active,created_at AS "createdAt"';
+const fields = 'id,type,username,name,role,active,created_at AS "createdAt"';
 export class UserRepository {
   constructor(readonly pool: Pool) {}
   async find(
     username: string,
-  ): Promise<(User & { passwordHash: string }) | undefined> {
+  ): Promise<(User & { passwordHash: string | null }) | undefined> {
     return (
       await this.pool.query(
         `SELECT ${fields},password_hash AS "passwordHash" FROM users WHERE username=$1`,
@@ -49,9 +49,9 @@ export class UserRepository {
   ): Promise<User | undefined> {
     return (
       await this.pool.query(
-        `SELECT u.id,u.username,u.name,u.role,u.active,u.created_at AS "createdAt"
+        `SELECT u.id,u.type,u.username,u.name,u.role,u.active,u.created_at AS "createdAt"
       FROM users u JOIN auth_sessions s ON s.user_id=u.id
-      WHERE u.id=$1 AND s.id=$2 AND u.active AND s.revoked_at IS NULL AND s.expires_at>NOW()`,
+      WHERE u.id=$1 AND u.type='user' AND s.id=$2 AND u.active AND s.revoked_at IS NULL AND s.expires_at>NOW()`,
         [userId, sessionId],
       )
     ).rows[0];
@@ -61,6 +61,36 @@ export class UserRepository {
       "UPDATE auth_sessions SET revoked_at=NOW() WHERE id=$1",
       [sessionId],
     );
+  }
+  async createIntegration(name: string, hash: string): Promise<User> {
+    return (
+      await this.pool.query(
+        `INSERT INTO users(id,type,name,role,api_token_hash) VALUES($1,'integration',$2,'operator',$3) RETURNING ${fields}`,
+        [randomUUID(), name, hash],
+      )
+    ).rows[0];
+  }
+  async integrationByToken(hash: string): Promise<User | undefined> {
+    return (
+      await this.pool.query(
+        `SELECT ${fields} FROM users WHERE type='integration' AND active AND api_token_hash=$1`,
+        [hash],
+      )
+    ).rows[0];
+  }
+  async setIntegrationToken(id: string, hash: string | null): Promise<User> {
+    const result = await this.pool.query(
+      `UPDATE users SET api_token_hash=$2,active=($2::text IS NOT NULL)
+       WHERE id=$1 AND type='integration' RETURNING ${fields}`,
+      [id, hash],
+    );
+    if (!result.rowCount)
+      throw new AppError(
+        404,
+        "INTEGRATION_NOT_FOUND",
+        "Integração não encontrada.",
+      );
+    return result.rows[0];
   }
   async changePassword(userId: string, hash: string) {
     await transaction(this.pool, async (client) => {

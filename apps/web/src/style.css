@@ -1532,6 +1532,30 @@ pre {
 .poll-responses > button {
   margin-top: 10px;
 }
+.group-readers .modal {
+  color: #203b34;
+  font-size: 13px;
+}
+.group-reader-list strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.group-reader-list .receipt-id {
+  font-size: 11px;
+}
+.group-reader-list {
+  list-style: none;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.group-reader-list li {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
 .poll-results {
   display: grid;
   gap: 16px;

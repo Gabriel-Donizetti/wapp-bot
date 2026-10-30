@@ -8,6 +8,7 @@ import {
   usernameSchema,
 } from "./auth-service.js";
 import { requireAdmin, requireAuth } from "./auth-middleware.js";
+import { uuidParam } from "../../http/query.js";
 export function authRoutes(auth: AuthService) {
   const router = Router();
   router.post(
@@ -39,7 +40,9 @@ export function authRoutes(auth: AuthService) {
     res.json(res.locals.user);
   });
   router.post("/logout", async (_req, res) => {
-    await auth.users.revoke(res.locals.authSessionId);
+    if (res.locals.authSessionId)
+      await auth.users.revoke(res.locals.authSessionId);
+    else await auth.users.setIntegrationToken(res.locals.user.id, null);
     res.sendStatus(204);
   });
   router.post("/change-password", async (req, res) => {
@@ -62,6 +65,13 @@ export function authRoutes(auth: AuthService) {
   });
   router.post("/users", requireAdmin, async (req, res) => {
     res.status(201).json(await auth.create(createUserSchema.parse(req.body)));
+  });
+  router.post("/users/:id/token", requireAdmin, async (req, res) => {
+    res.json(await auth.rotateIntegrationToken(uuidParam(req.params)));
+  });
+  router.delete("/users/:id/token", requireAdmin, async (req, res) => {
+    await auth.users.setIntegrationToken(uuidParam(req.params), null);
+    res.sendStatus(204);
   });
   return router;
 }

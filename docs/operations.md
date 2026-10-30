@@ -64,7 +64,7 @@ código se necessário.
 Códigos e o número solicitado para vinculação ficam apenas em memória. O código
 não aparece na listagem de sessões e deixa de ser disponibilizado após
 autenticação, desconexão ou falha. Não publique códigos ou QR em logs e capturas.
-As rotas exigem JWT; veja os exemplos e contratos no
+As rotas exigem Bearer (JWT ou token de integração); veja os exemplos e contratos no
 [guia de integração](integration.md#conectar-por-código-sem-escanear-qr).
 
 ## Preservar uma instalação local ao passar para Docker
@@ -201,6 +201,15 @@ e fecha conexões de preconnect sem requisição. Isso evita que o recarregament
 local fique preso aguardando uma conexão ociosa do navegador. A confirmação
 continua sujeita à política de resultados incertos descrita acima.
 
+## Confirmações individuais em grupos
+
+O botão **Quem leu no grupo** consulta as confirmações ao vivo usando
+`Message.getInfo()` do whatsapp-web.js. As rotas `read-receipts` de mensagens e
+agendamentos exigem a sessão conectada e conferem o autor e o grupo da mensagem.
+A resolução de nomes usa a agenda/perfil da mesma sessão, com concorrência e
+tempo limitados; se falhar, o ID e a confirmação continuam disponíveis. Não há
+persistência nem job de leitores. Falha de consulta não significa zero leituras.
+
 ## Prazo e coleta de votos das enquetes
 
 A migração 004 cria `poll_votes` e `poll_sync` e atribui 24 horas às enquetes
@@ -238,3 +247,21 @@ emitir os eventos; uma falha no evento não interrompe a persistência do voto n
 WhatsApp. Ao atualizar a biblioteca, valide `poll-compatibility.test.ts` também.
 O snapshot local do WhatsApp pode não permitir reconstruir escolhas de períodos
 offline ou entre coletas: os resultados representam os votos coletados.
+
+## Usuários normais e tokens de integração
+
+A migração 005 mantém todas as contas existentes como `type=user`, preservando
+senhas e sessões JWT. Contas `integration` têm usuário e senha nulos, perfil de
+operador e somente o hash SHA-256 do token em `api_token_hash`. O token completo
+é retornado apenas na criação ou substituição e não pode ser recuperado.
+
+Administradores podem gerar outro token ou revogá-lo em **Usuários**. Gerar um
+novo invalida o anterior e reativa a integração; revogar remove o hash e marca a
+conta como inativa. A autenticação consulta o banco em cada chamada, tornando a
+revogação efetiva na próxima requisição. O token não depende de `JWT_SECRET` nem
+de `JWT_TTL_SECONDS` e não expira automaticamente.
+
+Não publique ou registre o token completo. O middleware mantém Authorization
+redigido nos logs. Guarde os tokens no backend integrador e use HTTPS fora do
+ambiente local. A perda de um token exige gerar outro; restaure a mesma conta
+para preservar autoria e idempotência.

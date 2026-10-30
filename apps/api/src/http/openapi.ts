@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createUserSchema } from "../modules/auth/auth-service.js";
 import {
   messageBodySchema,
   scheduleBodySchema,
@@ -277,20 +278,24 @@ const receiptProperties = {
   lastAckAt: { type: "string", format: "date-time", nullable: true },
   lastCheckedAt: { type: "string", format: "date-time", nullable: true },
 };
-const userInput = object(
-  {
-    username: { type: "string", pattern: "^[a-z0-9_.-]{3,64}$" },
-    name: string,
-    password: {
-      type: "string",
-      minLength: 12,
-      maxLength: 128,
-      writeOnly: true,
-    },
-    role: { type: "string", enum: ["admin", "operator"], default: "operator" },
-  },
-  ["username", "name", "password"],
-);
+const userInput = z.toJSONSchema(createUserSchema, {
+  target: "openapi-3.0",
+  io: "input",
+});
+const userProperties = {
+  id: { type: "string", format: "uuid" },
+  type: { type: "string", enum: ["user", "integration"] },
+  username: { type: "string", nullable: true },
+  name: string,
+  role: { type: "string", enum: ["admin", "operator"] },
+  active: { type: "boolean" },
+  createdAt: { type: "string", format: "date-time" },
+};
+const integrationTokenProperty = {
+  type: "string",
+  description:
+    "Token opaco wapp_int_ gerado pelo servidor; retornado somente nesta operação. Não expira automaticamente e funciona até substituição, revogação ou desativação da conta.",
+};
 const page = (name: string) =>
   object({
     data: { type: "array", items: ref(name) },
@@ -320,7 +325,12 @@ export const openapi = {
   ].map((name) => ({ name })),
   components: {
     securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+      bearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        description:
+          "JWT de usuário normal ou token de integração wapp_int_. Informe somente o token no Authorize.",
+      },
     },
     schemas: {
       Error: object(
@@ -332,13 +342,14 @@ export const openapi = {
         },
         ["error", "message"],
       ),
-      User: object({
-        id: { type: "string", format: "uuid" },
-        username: string,
-        name: string,
-        role: { type: "string", enum: ["admin", "operator"] },
-        active: { type: "boolean" },
-        createdAt: { type: "string", format: "date-time" },
+      User: object(userProperties),
+      CreatedUser: object(
+        { ...userProperties, token: integrationTokenProperty },
+        Object.keys(userProperties),
+      ),
+      IntegrationToken: object({
+        user: ref("User"),
+        token: integrationTokenProperty,
       }),
       Session: object({
         id: string,
@@ -437,6 +448,21 @@ export const openapi = {
         syncedAt: { type: "string", format: "date-time", nullable: true },
         warning: { type: "string", nullable: true },
       }),
+      GroupReadReceipts: object({
+        sessionId: string,
+        messageId: string,
+        groupId: string,
+        totalReaders: { type: "integer" },
+        readers: {
+          type: "array",
+          items: object({
+            id: string,
+            name: { type: "string", nullable: true },
+            readAt: { type: "string", format: "date-time", nullable: true },
+          }),
+        },
+        fetchedAt: { type: "string", format: "date-time" },
+      }),
       SendMessage: sendInput,
       ScheduleInput: scheduleInput,
       MessageContent: previewInput,
@@ -527,7 +553,7 @@ export const openapi = {
     "/auth/logout": {
       post: operation(
         "Autenticação",
-        "Revogar o token atual",
+        "Revogar o token atual (JWT ou integração)",
         {},
         { responses: { 204: { description: "Sessão encerrada" }, ...errors } },
       ),
@@ -535,7 +561,7 @@ export const openapi = {
     "/auth/change-password": {
       post: operation(
         "Autenticação",
-        "Trocar senha e revogar todos os tokens do usuário",
+        "Trocar senha de usuário normal e revogar seus JWTs",
         {},
         {
           requestBody: body(
@@ -565,11 +591,40 @@ export const openapi = {
       post: operation(
         "Usuários",
         "Criar usuário ou conta de integração (administrador)",
-        ref("User"),
+        ref("CreatedUser"),
         {
           requestBody: body(userInput),
+          description:
+            "type=user (padrão) usa nome, username, password e role. type=integration aceita apenas nome e type: gera token de operador sem usuário/senha. O token é exibido uma vez; apenas seu hash é armazenado. Contas existentes permanecem do tipo user.",
           responses: {
-            201: response(ref("User"), "Usuário criado"),
+            201: response(
+              ref("CreatedUser"),
+              "Usuário criado; token incluído somente para integração",
+            ),
+            ...errors,
+          },
+        },
+      ),
+    },
+    "/auth/users/{id}/token": {
+      post: operation(
+        "Usuários",
+        "Gerar ou substituir token de integração (administrador)",
+        ref("IntegrationToken"),
+        {
+          parameters: [id],
+          description:
+            "Gera um token novo e invalida imediatamente o anterior. Reativa a integração se o token estava revogado. Somente para integrações; não altera a autoria nem as chaves de idempotência. Retorna 404 INTEGRATION_NOT_FOUND para contas normais ou inexistentes.",
+        },
+      ),
+      delete: operation(
+        "Usuários",
+        "Revogar token de integração (administrador)",
+        {},
+        {
+          parameters: [id],
+          responses: {
+            204: { description: "Token revogado e integração desativada" },
             ...errors,
           },
         },
@@ -765,6 +820,30 @@ export const openapi = {
             },
             ...paging,
           ],
+        },
+      ),
+    },
+    "/messages/{id}/read-receipts": {
+      get: operation(
+        "Mensagens",
+        "Consultar quem leu uma mensagem no grupo",
+        ref("GroupReadReceipts"),
+        {
+          parameters: [id],
+          description:
+            "Consulta ao vivo para mensagens de qualquer tipo enviadas a grupos pela sessão. Retorna IDs dos leitores, nome salvo ou de perfil quando disponível e horário da leitura informado pelo WhatsApp. Exige sessão ready e ID WhatsApp confirmado; não persiste os dados. name/readAt podem ser null. Lista vazia significa nenhuma confirmação disponível, não prova ausência de leitura. Conversas individuais retornam 409 NOT_A_GROUP_MESSAGE; sem ID, 409 NO_MESSAGE_RECEIPT; consulta indisponível, GROUP_READERS_UNAVAILABLE (422/502).",
+        },
+      ),
+    },
+    "/schedules/{id}/read-receipts": {
+      get: operation(
+        "Agendamentos",
+        "Consultar quem leu uma mensagem agendada no grupo",
+        ref("GroupReadReceipts"),
+        {
+          parameters: [id],
+          description:
+            "Disponível após o envio ao grupo. Mesmo formato e limites de GET /messages/{id}/read-receipts. Exige sessão ready; consulta ao vivo sem persistência. Quem não aparece tem leitura não confirmada.",
         },
       ),
     },

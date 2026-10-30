@@ -55,8 +55,12 @@ export class FakeClient extends EventEmitter {
       fromMe: boolean;
       type: string;
       ack: number | null;
+      getInfo: () => Promise<unknown>;
     }
   >();
+  messageInfo: unknown = { read: [] };
+  messageInfoError = false;
+  infoRequests: string[] = [];
   quotedChatId = "5511888888888@c.us";
   pollVotes: whatsapp.PollVote[] = [];
   pollVotesError = false;
@@ -127,7 +131,12 @@ export class FakeClient extends EventEmitter {
   }
   async getContactById(id: string) {
     if (this.contactError) throw new Error("Contato indisponível");
-    return { id: { _serialized: id }, isUser: true, isGroup: false };
+    return {
+      ...this.contacts.find((contact) => contact.id._serialized === id),
+      id: { _serialized: id },
+      isUser: true,
+      isGroup: false,
+    };
   }
   async getMessageById(id: string) {
     if (this.messageStates.has(id) && !this.quoteMissing)
@@ -153,14 +162,20 @@ export class FakeClient extends EventEmitter {
       to,
       text: typeof content === "string" ? content : "[media]",
     });
+    const messageId = `message-${this.sent.length}`;
     const message = {
-      id: { _serialized: `message-${this.sent.length}`, remote: to },
+      id: { _serialized: messageId, remote: to },
       fromMe: true,
       type:
         typeof content === "object" && "pollName" in content
           ? "poll_creation"
           : "chat",
       ack: this.resultAck,
+      getInfo: async () => {
+        this.infoRequests.push(messageId);
+        if (this.messageInfoError) throw new Error("Informações indisponíveis");
+        return this.messageInfo;
+      },
     };
     this.messageStates.set(message.id._serialized, message);
     if (this.earlyAck !== undefined)

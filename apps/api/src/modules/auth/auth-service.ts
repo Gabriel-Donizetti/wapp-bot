@@ -1,6 +1,12 @@
 import { SignJWT, jwtVerify } from "jose";
 import { z } from "zod";
-import type { Login, User } from "@wapp/contracts";
+import { createHash, randomBytes } from "node:crypto";
+import type {
+  CreatedUser,
+  IntegrationToken,
+  Login,
+  User,
+} from "@wapp/contracts";
 import { AppError } from "../../shared/errors.js";
 import { UserRepository } from "./user-repository.js";
 import { hashPassword, verifyPassword } from "./password.js";
@@ -11,14 +17,27 @@ export const usernameSchema = z
   .toLowerCase()
   .regex(/^[a-z0-9_.-]{3,64}$/);
 export const passwordSchema = z.string().min(12).max(128);
-export const createUserSchema = z
+const normalUserSchema = z
   .object({
+    type: z.literal("user").default("user"),
     username: usernameSchema,
     name: z.string().trim().min(1).max(100),
     password: passwordSchema,
     role: z.enum(["admin", "operator"]).default("operator"),
   })
   .strict();
+export const createUserSchema = z.union([
+  normalUserSchema,
+  z
+    .object({
+      type: z.literal("integration"),
+      name: z.string().trim().min(1).max(100),
+    })
+    .strict(),
+]);
+const generateToken = () => `wapp_int_${randomBytes(32).toString("base64url")}`;
+const hashToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
 const dummyHash = `scrypt$${"0".repeat(32)}$${"0".repeat(128)}`;
 export class AuthService {
   private secret: Uint8Array;
@@ -31,8 +50,16 @@ export class AuthService {
       throw new Error("JWT_SECRET deve ter pelo menos 32 caracteres.");
     this.secret = new TextEncoder().encode(secret);
   }
-  async create(input: z.infer<typeof createUserSchema>) {
+  async create(input: z.input<typeof createUserSchema>): Promise<CreatedUser> {
     const data = createUserSchema.parse(input);
+    if (data.type === "integration") {
+      const token = generateToken();
+      const user = await this.users.createIntegration(
+        data.name,
+        hashToken(token),
+      );
+      return { ...user, token };
+    }
     return this.users.create(
       data.username,
       data.name,
@@ -78,7 +105,21 @@ export class AuthService {
       .sign(this.secret);
     return { accessToken, tokenType: "Bearer", expiresIn: this.ttl, user };
   }
-  async verify(token: string): Promise<{ user: User; sessionId: string }> {
+  async verify(
+    token: string,
+  ): Promise<{ user: User; sessionId: string | null }> {
+    if (token.startsWith("wapp_int_")) {
+      const user = /^wapp_int_[A-Za-z0-9_-]{43}$/.test(token)
+        ? await this.users.integrationByToken(hashToken(token))
+        : undefined;
+      if (!user)
+        throw new AppError(
+          401,
+          "INVALID_TOKEN",
+          "Token de integração inválido ou revogado.",
+        );
+      return { user, sessionId: null };
+    }
     let subject: string;
     let sessionId: string;
     try {
@@ -110,9 +151,15 @@ export class AuthService {
     currentPassword: string,
     newPassword: string,
   ) {
+    if (user.type !== "user" || !user.username)
+      throw new AppError(
+        403,
+        "INTEGRATION_PASSWORD_UNAVAILABLE",
+        "Integrações usam token e não possuem senha.",
+      );
     const record = await this.users.find(user.username);
     if (
-      !record ||
+      !record?.passwordHash ||
       !(await verifyPassword(currentPassword, record.passwordHash))
     )
       throw new AppError(
@@ -124,5 +171,12 @@ export class AuthService {
       user.id,
       await hashPassword(passwordSchema.parse(newPassword)),
     );
+  }
+  async rotateIntegrationToken(id: string): Promise<IntegrationToken> {
+    const token = generateToken();
+    return {
+      user: await this.users.setIntegrationToken(id, hashToken(token)),
+      token,
+    };
   }
 }

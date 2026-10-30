@@ -1,10 +1,16 @@
 export interface User {
   id: string;
-  username: string;
+  type: "user" | "integration";
+  username: string | null;
   name: string;
   role: "admin" | "operator";
   active: boolean;
   createdAt: string;
+}
+export type CreatedUser = User & { token?: string };
+export interface IntegrationToken {
+  user: User;
+  token: string;
 }
 export interface Session {
   id: string;
@@ -156,6 +162,14 @@ export interface DeliveryReceipt {
   playedAt: string | null;
   lastAckAt: string | null;
   lastCheckedAt: string | null;
+}
+export interface GroupReadReceipts {
+  sessionId: string;
+  messageId: string;
+  groupId: string;
+  totalReaders: number;
+  readers: Array<{ id: string; name: string | null; readAt: string | null }>;
+  fetchedAt: string;
 }
 export interface Schedule extends DeliveryReceipt {
   id: string;

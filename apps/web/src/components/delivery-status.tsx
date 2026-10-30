@@ -8,6 +8,7 @@ import {
 import type { Message, Schedule } from "@wapp/contracts";
 import { api } from "../lib/api";
 import { Badge, dateTime, useAction } from "./ui";
+import { GroupReaders } from "./group-readers";
 
 export function DeliveryStatus({
   item,
@@ -110,6 +111,9 @@ export function DeliveryStatus({
           <RefreshCw size={14} />
           {action.busy ? "Consultando…" : "Consultar no WhatsApp"}
         </button>
+      ) : null}
+      {item.messageId && item.to.endsWith("@g.us") ? (
+        <GroupReaders id={item.id} kind={kind} />
       ) : null}
       {action.feedback}
     </div>
